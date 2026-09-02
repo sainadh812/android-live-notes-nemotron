@@ -76,9 +76,31 @@ class NemotronTranscriber(
     private val sampleRateHz = 16000
     private val chunkFrames = (sampleRateHz * 0.5).toInt() // ~500ms chunks
 
-    /** Starts model load (once) + mic capture + streaming feed loop. */
+    /**
+     * Starts (or resumes) mic capture + streaming feed loop. If a model
+     * is already loaded from a prior start()/stop() cycle, reuses it via
+     * nativeRestartStream instead of reloading the ~500-700MB GGUF file
+     * from disk and leaking the previous native handle - nativeInit is
+     * only called once per NemotronTranscriber instance's lifetime.
+     */
     fun start() {
         if (running) return
+
+        if (handle != 0L) {
+            mainHandler.post { listener.onStateChanged("restarting") }
+            thread(name = "nemotron-restart") {
+                val restarted = nativeRestartStream(handle, language, attContextRight)
+                if (!restarted) {
+                    mainHandler.post {
+                        listener.onError("Failed to restart Nemotron stream (see logcat NemotronJNI)")
+                        listener.onStateChanged("stopped")
+                    }
+                    return@thread
+                }
+                startCapture()
+            }
+            return
+        }
 
         if (!File(modelPath).exists()) {
             listener.onError("Model file not found at $modelPath")
@@ -135,7 +157,7 @@ class NemotronTranscriber(
         captureThread = thread(name = "nemotron-capture") {
             val pcm16 = ShortArray(chunkFrames)
             val pcmF32 = FloatArray(chunkFrames)
-            var lastCommitted = ""
+            var lastFullText = ""
 
             while (running) {
                 val n = record.read(pcm16, 0, chunkFrames)
@@ -153,12 +175,16 @@ class NemotronTranscriber(
                 val committed = parts.getOrElse(0) { "" }
                 val tentative = parts.getOrElse(1) { "" }
 
-                if (committed.isNotEmpty() && committed != lastCommitted) {
-                    lastCommitted = committed
-                    mainHandler.post { listener.onTranscript(committed, isFinal = false) }
-                }
-                if (tentative.isNotEmpty()) {
-                    mainHandler.post { listener.onTranscript(tentative, isFinal = false) }
+                // Post ONE combined hypothesis per feed, not two sequential
+                // updates - posting committed then tentative separately
+                // means the second post overwrites the first with only the
+                // tentative suffix, silently dropping the committed prefix
+                // from every downstream consumer (UI text, DB transcript
+                // rows, and the summarizer's context window).
+                val currentText = committed + tentative
+                if (currentText.isNotEmpty() && currentText != lastFullText) {
+                    lastFullText = currentText
+                    mainHandler.post { listener.onTranscript(currentText, isFinal = false) }
                 }
             }
         }
@@ -168,13 +194,26 @@ class NemotronTranscriber(
     fun stop() {
         if (!running) return
         running = false
+
+        // Stop the AudioRecord FIRST: if the capture thread is currently
+        // blocked inside record.read(), calling stop() is what unblocks
+        // it (read() returns). Joining before stopping would just wait
+        // out the full timeout with the thread still stuck in read(),
+        // then release() below would run concurrently with that still-
+        // blocked read() call - the exact native-crash race this guards
+        // against.
+        audioRecord?.let {
+            try {
+                it.stop()
+            } catch (_: IllegalStateException) {
+                // Already stopped/not recording - safe to ignore.
+            }
+        }
+
         captureThread?.join(2000)
         captureThread = null
 
-        audioRecord?.let {
-            it.stop()
-            it.release()
-        }
+        audioRecord?.release()
         audioRecord = null
 
         if (handle != 0L) {
