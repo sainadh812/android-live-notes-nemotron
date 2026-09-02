@@ -16,7 +16,6 @@ import com.sainadh.livenotes.LiveNotesApplication
 import com.sainadh.livenotes.MainActivity
 import com.sainadh.livenotes.R
 import com.sainadh.livenotes.audio.BluetoothAudioRouter
-import com.sainadh.livenotes.stt.ModelDownloadManager
 import com.sainadh.livenotes.stt.NemotronTranscriber
 import com.sainadh.livenotes.stt.SpeechTranscriber
 import kotlinx.coroutines.CoroutineScope
@@ -45,23 +44,12 @@ class ForegroundListeningService : Service(), SpeechTranscriber.Listener {
         super.onCreate()
         createNotificationChannel()
         bluetoothAudioRouter = BluetoothAudioRouter(this)
-
-        // Picks whichever quant is actually present on disk (the user may
-        // have downloaded any of the four via the in-app model downloader -
-        // see ModelDownloadManager / the "On-device model" settings section).
-        val downloadManager = ModelDownloadManager(this)
-        val availableQuant = downloadManager.findAnyDownloaded()
-        usingNemotron = availableQuant != null
-        if (usingNemotron && availableQuant != null) {
-            nemotronTranscriber = NemotronTranscriber(
-                context = this,
-                modelPath = downloadManager.modelFile(availableQuant).absolutePath,
-                language = "en-US",
-                listener = this
-            )
-        } else {
-            speechTranscriber = SpeechTranscriber(this, this)
-        }
+        // Transcriber selection now happens in startListening(), re-checked
+        // on every listen toggle - NOT here. Deciding once in onCreate()
+        // meant a model downloaded after the service was first created
+        // (which can be long-lived across many start/stop cycles) was
+        // silently never picked up; the app kept using SpeechTranscriber
+        // forever with no error shown.
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -74,20 +62,65 @@ class ForegroundListeningService : Service(), SpeechTranscriber.Listener {
 
     override fun onBind(intent: Intent?): IBinder? = null
 
+    /**
+     * Picks whichever quant is actually present on disk right now, falling
+     * back to SpeechTranscriber if none is downloaded OR the native libs
+     * failed to load (see NemotronTranscriber.isAvailable()). Re-evaluated
+     * on every call so a model downloaded mid-session, or a native-load
+     * failure, is reflected the next time listening starts - not just once
+     * for the lifetime of the service instance.
+     */
+    private fun resolveTranscriber() {
+        val app = application as LiveNotesApplication
+        val downloadManager = app.appContainer.modelDownloadManager
+        val availableQuant = downloadManager.findAnyDownloaded()
+        val wantNemotron = availableQuant != null && NemotronTranscriber.isAvailable()
+
+        if (wantNemotron == usingNemotron && (nemotronTranscriber != null || speechTranscriber != null)) {
+            return // already on the right transcriber, nothing to do
+        }
+
+        // Switching (or first-time setup): tear down whichever transcriber
+        // is currently active before building the new one.
+        nemotronTranscriber?.destroy()
+        nemotronTranscriber = null
+        speechTranscriber?.destroy()
+        speechTranscriber = null
+
+        usingNemotron = wantNemotron
+        if (usingNemotron && availableQuant != null) {
+            nemotronTranscriber = NemotronTranscriber(
+                context = this,
+                modelPath = downloadManager.modelFile(availableQuant).absolutePath,
+                language = "en-US",
+                listener = this
+            )
+        } else {
+            if (availableQuant != null && !NemotronTranscriber.isAvailable()) {
+                ServiceStateTracker.lastSummaryError.value =
+                    "On-device model downloaded but native libs failed to load (${NemotronTranscriber.loadError()}) - using OS speech recognizer instead"
+            }
+            speechTranscriber = SpeechTranscriber(this, this)
+        }
+    }
+
     private fun startListening() {
         startForeground(
             NOTIFICATION_ID,
             buildNotification(getString(R.string.notification_listening_title), "Preparing microphone")
         )
-        ServiceStateTracker.listening.value = true
         ServiceStateTracker.lastSummaryError.value = null
+        resolveTranscriber() // may set lastSummaryError (native-load fallback) - must run AFTER the clear above
+        ServiceStateTracker.listening.value = true
         val app = application as LiveNotesApplication
         val selectedInputMode = app.appContainer.secureSettings.readAudioInputMode()
         val resolvedRoute = bluetoothAudioRouter?.activate(selectedInputMode) ?: "Phone microphone"
         ServiceStateTracker.audioRoute.value = resolvedRoute
         acquireWakeLock()
         if (usingNemotron) nemotronTranscriber?.start() else speechTranscriber?.start()
-        updateNotification("Using $resolvedRoute")
+        updateNotification(
+            "Using $resolvedRoute" + if (usingNemotron) " (on-device Nemotron)" else " (OS speech recognizer)"
+        )
     }
 
     private fun stopListeningAndSelf() {

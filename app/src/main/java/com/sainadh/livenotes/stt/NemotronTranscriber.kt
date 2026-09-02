@@ -46,17 +46,41 @@ class NemotronTranscriber(
     private val listener: SpeechTranscriber.Listener
 ) {
     companion object {
+        // Tracks whether the native libs loaded successfully. A failure
+        // here (e.g. UnsatisfiedLinkError from a 16KB-page-size mismatch
+        // on newer devices) used to be uncaught and could crash the whole
+        // app process since this ran inside Service.onCreate(). Now it's
+        // caught, recorded, and callers check isAvailable() first so a
+        // native load failure degrades to "fall back to SpeechTranscriber"
+        // instead of "app crashes / silently does nothing."
+        @Volatile private var nativeLibsLoaded = false
+        @Volatile private var nativeLoadError: String? = null
+
         init {
-            // Load order matters: dependents before the library that needs
-            // them. ggml-base has no ggml deps; ggml and ggml-cpu depend on
-            // it; libtranscribe depends on all three; nemotron_jni depends
-            // on libtranscribe. jniLibs packaging preserves these names.
-            System.loadLibrary("ggml-base")
-            System.loadLibrary("ggml")
-            System.loadLibrary("ggml-cpu")
-            System.loadLibrary("transcribe")
-            System.loadLibrary("nemotron_jni")
+            try {
+                // Load order matters: dependents before the library that
+                // needs them. ggml-base has no ggml deps; ggml and
+                // ggml-cpu depend on it; libtranscribe depends on all
+                // three; nemotron_jni depends on libtranscribe. jniLibs
+                // packaging preserves these names.
+                System.loadLibrary("ggml-base")
+                System.loadLibrary("ggml")
+                System.loadLibrary("ggml-cpu")
+                System.loadLibrary("transcribe")
+                System.loadLibrary("nemotron_jni")
+                nativeLibsLoaded = true
+            } catch (e: UnsatisfiedLinkError) {
+                nativeLoadError = e.message ?: "UnsatisfiedLinkError loading native libs"
+            } catch (e: Throwable) {
+                nativeLoadError = e.message ?: e.javaClass.simpleName
+            }
         }
+
+        /** True if all native libs loaded successfully at class-load time. */
+        fun isAvailable(): Boolean = nativeLibsLoaded
+
+        /** Non-null failure reason when [isAvailable] is false. */
+        fun loadError(): String? = nativeLoadError
     }
 
     private external fun nativeInit(modelPath: String, language: String, attContextRight: Int): Long
@@ -85,6 +109,11 @@ class NemotronTranscriber(
      */
     fun start() {
         if (running) return
+
+        if (!nativeLibsLoaded) {
+            listener.onError("Native ASR libraries failed to load: ${nativeLoadError ?: "unknown reason"}")
+            return
+        }
 
         if (handle != 0L) {
             mainHandler.post { listener.onStateChanged("restarting") }

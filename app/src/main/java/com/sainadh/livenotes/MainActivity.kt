@@ -144,7 +144,6 @@ private fun LiveNotesScreen(
             item {
                 HeaderCard(
                     isListening = isListening,
-                    latestTranscript = latestTranscript,
                     currentAudioRoute = currentAudioRoute,
                     onToggle = {
                         if (canListenNow()) {
@@ -153,6 +152,12 @@ private fun LiveNotesScreen(
                             permissionLauncher.launch(requiredPermissions())
                         }
                     }
+                )
+            }
+            item {
+                LiveTranscriptCard(
+                    isListening = isListening,
+                    latestTranscript = latestTranscript
                 )
             }
             if (!lastSummaryError.isNullOrBlank()) {
@@ -220,7 +225,6 @@ private fun LiveNotesScreen(
 @Composable
 private fun HeaderCard(
     isListening: Boolean,
-    latestTranscript: String,
     currentAudioRoute: String,
     onToggle: () -> Unit
 ) {
@@ -248,9 +252,44 @@ private fun HeaderCard(
                 }
                 Switch(checked = isListening, onCheckedChange = { onToggle() })
             }
+        }
+    }
+}
+
+/**
+ * Dedicated, visually prominent live-transcript panel - separate from
+ * HeaderCard so it can't be mistaken for a static subtitle line. Shows a
+ * clear "waiting for speech" state distinct from "listening but nothing
+ * transcribed yet" so a stalled transcriber is visible, not just blank.
+ */
+@Composable
+private fun LiveTranscriptCard(isListening: Boolean, latestTranscript: String) {
+    Card(
+        colors = CardDefaults.cardColors(
+            containerColor = if (isListening) Color(0xFFECFDF5) else Color.White
+        ),
+        shape = RoundedCornerShape(20.dp),
+        elevation = CardDefaults.cardElevation(defaultElevation = 4.dp)
+    ) {
+        Column(modifier = Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text("Live transcript", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                if (isListening) {
+                    Text("\u25CF listening", color = Color(0xFF059669), fontWeight = FontWeight.SemiBold)
+                }
+            }
             Text(
-                text = if (latestTranscript.isBlank()) "Latest transcript will appear here once listening starts." else latestTranscript,
-                color = Color(0xFF0F172A)
+                text = when {
+                    latestTranscript.isNotBlank() -> latestTranscript
+                    isListening -> "Listening... say something and text will appear here."
+                    else -> "Not listening. Toggle the switch above to start."
+                },
+                style = MaterialTheme.typography.bodyLarge,
+                color = if (latestTranscript.isBlank()) Color(0xFF94A3B8) else Color(0xFF0F172A)
             )
         }
     }
