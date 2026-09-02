@@ -16,6 +16,7 @@ import com.sainadh.livenotes.LiveNotesApplication
 import com.sainadh.livenotes.MainActivity
 import com.sainadh.livenotes.R
 import com.sainadh.livenotes.audio.BluetoothAudioRouter
+import com.sainadh.livenotes.stt.ModelDownloadManager
 import com.sainadh.livenotes.stt.NemotronTranscriber
 import com.sainadh.livenotes.stt.SpeechTranscriber
 import kotlinx.coroutines.CoroutineScope
@@ -24,7 +25,6 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.launch
-import java.io.File
 
 object ServiceStateTracker {
     val listening = MutableStateFlow(false)
@@ -32,17 +32,6 @@ object ServiceStateTracker {
     val audioRoute = MutableStateFlow("Not listening")
     val lastSummaryError = MutableStateFlow<String?>(null)
 }
-
-/**
- * Picks the on-device Nemotron 3.5 streaming ASR transcriber when a GGUF
- * model file is present under the app's files dir, falling back to the
- * OS SpeechRecognizer-based SpeechTranscriber otherwise. This makes the
- * native path opt-in by simply dropping a model file on the device -
- * no separate build variant needed. See NemotronTranscriber's kdoc for
- * where that file is expected and how to get one there.
- */
-private fun nemotronModelFile(context: Context): File =
-    File(context.filesDir, "models/nemotron-3.5-asr-streaming-0.6b-Q8_0.gguf")
 
 class ForegroundListeningService : Service(), SpeechTranscriber.Listener {
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
@@ -57,12 +46,16 @@ class ForegroundListeningService : Service(), SpeechTranscriber.Listener {
         createNotificationChannel()
         bluetoothAudioRouter = BluetoothAudioRouter(this)
 
-        val modelFile = nemotronModelFile(this)
-        usingNemotron = modelFile.exists()
-        if (usingNemotron) {
+        // Picks whichever quant is actually present on disk (the user may
+        // have downloaded any of the four via the in-app model downloader -
+        // see ModelDownloadManager / the "On-device model" settings section).
+        val downloadManager = ModelDownloadManager(this)
+        val availableQuant = downloadManager.findAnyDownloaded()
+        usingNemotron = availableQuant != null
+        if (usingNemotron && availableQuant != null) {
             nemotronTranscriber = NemotronTranscriber(
                 context = this,
-                modelPath = modelFile.absolutePath,
+                modelPath = downloadManager.modelFile(availableQuant).absolutePath,
                 language = "en-US",
                 listener = this
             )
