@@ -137,6 +137,28 @@ class ModelDownloadManager(
                     return
                 }
 
+                // Sanity-check the file is actually a GGUF model before treating
+                // it as complete. A byte-count match against Content-Length
+                // alone doesn't prove the bytes are real - if the server (or a
+                // proxy in between) ever returned an error/redirect page with a
+                // misleading Content-Length, or a download got silently
+                // truncated/corrupted, this would previously still get renamed
+                // to the final .gguf name and reported as available, and
+                // NemotronTranscriber.start() would try to load garbage as a
+                // model - which can fail silently or hang rather than
+                // producing a clean error, looking exactly like "downloaded
+                // fine but transcription never starts." GGUF files always
+                // begin with the 4 magic bytes 'G','G','U','F' (0x47475546
+                // little-endian) - cheap to check, catches this whole class
+                // of corruption before it ever reaches the native loader.
+                if (!looksLikeGguf(partFile)) {
+                    partFile.delete()
+                    _state.value = ModelDownloadState.Failed(
+                        "Downloaded file is not a valid GGUF model (bad magic bytes) - deleted, please retry"
+                    )
+                    return
+                }
+
                 // Atomic-ish completion: only becomes visible to
                 // ForegroundListeningService's file-existence check after
                 // the full download succeeds.
@@ -149,6 +171,20 @@ class ModelDownloadManager(
             }
         } catch (e: IOException) {
             _state.value = ModelDownloadState.Failed(e.message ?: "Network error - retry to resume")
+        }
+    }
+
+    /** True if the file starts with the GGUF magic bytes ('G','G','U','F'). */
+    private fun looksLikeGguf(file: File): Boolean {
+        return try {
+            file.inputStream().use { input ->
+                val magic = ByteArray(4)
+                val read = input.read(magic)
+                read == 4 && magic[0] == 'G'.code.toByte() && magic[1] == 'G'.code.toByte() &&
+                    magic[2] == 'U'.code.toByte() && magic[3] == 'F'.code.toByte()
+            }
+        } catch (_: IOException) {
+            false
         }
     }
 

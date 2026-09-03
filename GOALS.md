@@ -51,6 +51,21 @@ Local checkout: /tmp/android-live-notes
   client had no explicit timeouts (10s default, too short for a real
   LLM chat-completion call with a full transcript window) - now 60s
   read/write.
+- v0.9.0: user tested v0.8.0 on the S25 Ultra. Confirmed: BEFORE
+  downloading a model, transcription worked (this is the OS
+  SpeechRecognizer fallback - expected, correct behavior, not a bug).
+  AFTER downloading a model, transcription stopped working entirely.
+  Root cause found: ModelDownloadManager never validated the
+  downloaded file was actually a valid GGUF model - only checked
+  byte-count against the HTTP Content-Length header. If the download
+  was ever truncated/corrupted, or a proxy/CDN returned an error page
+  with a misleading Content-Length, the app would still rename it to
+  the final .gguf name and report it as "downloaded" - then
+  nativeInit() would try to load garbage, which can fail silently or
+  hang rather than producing a clean error. This exactly matches
+  "worked before download, totally silent after." Fixed: check the
+  4-byte GGUF magic header ('G','G','U','F') before accepting a
+  download as complete; delete + report Failed if it doesn't match.
 
 ## Resolved findings from independent review
 - 16KB page-size alignment: FIXED in v0.7.0, RE-CONFIRMED independently
@@ -60,6 +75,15 @@ Local checkout: /tmp/android-live-notes
   risk in BluetoothAudioRouter: FIXED in v0.8.0.
 - OkHttp default 10s timeouts too short for real LLM calls: FIXED in
   v0.8.0.
+- Downloaded model file never validated as real GGUF (byte-count check
+  only, no content check): FIXED in v0.9.0.
+
+## IMPORTANT for the user, every time this is tested
+If a model was downloaded BEFORE v0.9.0, it may already be a corrupted
+file that passed the old (byte-count-only) check. Delete it via the
+app's Delete button and re-download - reinstalling the APK alone will
+NOT clear it, since it lives in app-private storage
+(filesDir/models/*.gguf), separate from the APK itself.
 
 ## Still open (not fixed - needs user input before touching)
 - LlmProvider.OPENAI.defaultModel = "gpt-5.4" is not a real OpenAI
@@ -86,18 +110,26 @@ Local checkout: /tmp/android-live-notes
   transcribe-cpp-android-jni skill for the full build pipeline).
 
 ## Current status (as of this file)
-Three independent code review passes have now checked the STT
-pipeline. All known bugs, including the 16KB page-size alignment
-issue and a newly-found MODIFY_AUDIO_SETTINGS permission gap, are
-fixed as of v0.8.0. v0.8.0 is the build to test next on the actual
-device.
+User tested v0.8.0 on the actual S25 Ultra - first real device
+feedback after three static-analysis-only review passes. Confirmed
+the OS-fallback path works correctly before a model is downloaded,
+and found the on-device Nemotron path breaks after downloading -
+root-caused to a missing GGUF-validity check in ModelDownloadManager,
+fixed in v0.9.0 (see above). This is real user-confirmed feedback
+finally distinguishing which theories mattered - all three prior
+review passes' static findings (16KB alignment, permission gaps,
+volatility races) were real but did not explain this specific
+symptom on their own.
 
-If v0.8.0 still doesn't transcribe, static analysis has been
-exhausted on every suspect found across three review passes - the
+v0.9.0 is the build to test next. IMPORTANT: delete any previously
+downloaded model first (see note above) since it may be corrupted
+from before this validation existed.
+
+If v0.9.0 still doesn't transcribe after a clean re-download, the
 next step is an actual adb logcat capture from the S25 Ultra (grep
 for NemotronJNI/UnsatisfiedLinkError/SecurityException/
-AndroidRuntime while toggling listening), since no further leads
-remain that are checkable from source alone.
+AndroidRuntime while toggling listening) - static analysis has
+found and fixed every plausible cause checkable from source alone.
 
 ## Standing workflow
 After every build/fix: build -> verify APK -> push source+APK to GitHub
