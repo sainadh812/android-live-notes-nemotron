@@ -1,0 +1,7 @@
+<resources>
+    <string name="app_name">LiveMeetingNotes</string>
+    <string name="notification_channel_name">Live transcription</string>
+    <string name="notification_channel_description">Shows status while background listening is active</string>
+    <string name="notification_listening_title">Listening for speech</string>
+    <string name="notification_idle_title">Listening paused</string>
+</resources>
