@@ -90,9 +90,17 @@ class NemotronTranscriber(
     private external fun nativeDestroy(handle: Long)
 
     private val mainHandler = Handler(Looper.getMainLooper())
-    private var handle: Long = 0L
-    private var audioRecord: AudioRecord? = null
-    private var captureThread: Thread? = null
+    // @Volatile: written on background threads (nemotron-init/nemotron-restart)
+    // and read from the main thread in stop()/destroy() shortly after start()
+    // returns. Without this, stop()/destroy() called right after start() while
+    // the init thread is still running could observe a stale handle == 0L even
+    // though the background thread already set it - skipping
+    // nativeFinalizeStream/nativeDestroy and leaking the native session. Same
+    // reasoning applies to audioRecord/captureThread, set inside startCapture()
+    // on that same background thread.
+    @Volatile private var handle: Long = 0L
+    @Volatile private var audioRecord: AudioRecord? = null
+    @Volatile private var captureThread: Thread? = null
     @Volatile private var running = false
 
     // 16kHz mono float32 PCM, matching transcribe.cpp's required input
