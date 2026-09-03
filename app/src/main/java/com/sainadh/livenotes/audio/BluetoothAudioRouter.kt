@@ -8,33 +8,52 @@ import android.os.Build
 class BluetoothAudioRouter(context: Context) {
     private val audioManager = context.getSystemService(AudioManager::class.java)
 
+    /**
+     * Attempts audio routing for [inputMode]. Any SecurityException here
+     * (audio-routing calls like setMode/setCommunicationDevice/
+     * startBluetoothSco require MODIFY_AUDIO_SETTINGS, which is now
+     * declared in the manifest - but this is still called unconditionally
+     * from ForegroundListeningService.startListening() on the main thread
+     * with no caller-side try/catch, so a defensive catch here prevents an
+     * OEM-specific audio-stack quirk from crashing the whole app process
+     * before the transcriber even starts) degrades to the phone mic
+     * instead of propagating.
+     */
     fun activate(inputMode: AudioInputMode): String {
-        return when (inputMode) {
-            AudioInputMode.AUTO -> {
-                if (tryActivateBluetoothRoute()) {
-                    "Bluetooth microphone"
-                } else {
+        return try {
+            when (inputMode) {
+                AudioInputMode.AUTO -> {
+                    if (tryActivateBluetoothRoute()) {
+                        "Bluetooth microphone"
+                    } else {
+                        activatePhoneMicrophone()
+                        "Phone microphone"
+                    }
+                }
+                AudioInputMode.PHONE_MIC -> {
                     activatePhoneMicrophone()
                     "Phone microphone"
                 }
-            }
-            AudioInputMode.PHONE_MIC -> {
-                activatePhoneMicrophone()
-                "Phone microphone"
-            }
-            AudioInputMode.BLUETOOTH_MIC -> {
-                if (tryActivateBluetoothRoute()) {
-                    "Bluetooth microphone"
-                } else {
-                    activatePhoneMicrophone()
-                    "Phone microphone (Bluetooth unavailable)"
+                AudioInputMode.BLUETOOTH_MIC -> {
+                    if (tryActivateBluetoothRoute()) {
+                        "Bluetooth microphone"
+                    } else {
+                        activatePhoneMicrophone()
+                        "Phone microphone (Bluetooth unavailable)"
+                    }
                 }
             }
+        } catch (e: SecurityException) {
+            "Phone microphone (audio routing permission denied: ${e.message})"
         }
     }
 
     fun release() {
-        activatePhoneMicrophone()
+        try {
+            activatePhoneMicrophone()
+        } catch (_: SecurityException) {
+            // Best-effort cleanup; nothing more to do if this fails too.
+        }
     }
 
     private fun tryActivateBluetoothRoute(): Boolean {

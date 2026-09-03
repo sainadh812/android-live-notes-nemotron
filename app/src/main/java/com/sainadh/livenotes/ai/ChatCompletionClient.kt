@@ -10,6 +10,7 @@ import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
+import java.util.concurrent.TimeUnit
 
 enum class LlmProvider(val displayName: String, val baseUrl: String, val defaultModel: String) {
     OPENAI(
@@ -57,7 +58,18 @@ data class LlmSummaryResult(
 )
 
 class ChatCompletionClient(
-    private val client: OkHttpClient = OkHttpClient(),
+    // Default OkHttpClient() has 10s connect/read/write timeouts - too
+    // short for a real chat-completions call with a full transcript-window
+    // prompt, which commonly takes longer than that to respond. A slow
+    // response would surface as a raw SocketTimeoutException ("Connection
+    // failed: null" or similar) instead of a clean LLM-side error,
+    // confusing the actual cause. 60s read/write gives real model calls
+    // room to complete.
+    private val client: OkHttpClient = OkHttpClient.Builder()
+        .connectTimeout(15, TimeUnit.SECONDS)
+        .readTimeout(60, TimeUnit.SECONDS)
+        .writeTimeout(60, TimeUnit.SECONDS)
+        .build(),
     private val json: Json = Json {
         ignoreUnknownKeys = true
     }
