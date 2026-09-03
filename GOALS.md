@@ -21,21 +21,40 @@ Local checkout: /tmp/android-live-notes
 ## Known bug history
 - v0.3.0: fixed committed/tentative transcript overwrite bug (was
   silently dropping transcript text on every audio chunk)
+- v0.4.0: caught native-load crash risk, fixed stale transcriber
+  selection, added dedicated live-transcript UI card
+- v0.5.0: fixed repo integrity - GitHub repo was missing ~60 baseline
+  files (manifest, SpeechTranscriber, resources, gradle config), never
+  buildable from a fresh clone until this release
+- v0.6.0: fixed handle/audioRecord/captureThread missing @Volatile
+  (found by an independent review session) - could leak the native
+  session if stop()/destroy() raced a still-running init thread
+
+## Open findings from independent review (not yet resolved)
+- 16KB page-size alignment: all 5 native .so libs are 4KB-aligned
+  (0x1000), not 16KB (0x4000). Leading unconfirmed suspect for total
+  silent transcription failure on 16KB-page devices (S25 Ultra is this
+  class). Code DOES catch UnsatisfiedLinkError gracefully, but a
+  page-size mismatch can manifest as a native SIGBUS/SIGSEGV during
+  dlopen that no Kotlin try/catch can intercept. Needs either an
+  on-device logcat check or a transcribe.cpp rebuild with
+  -Wl,-z,max-page-size=16384.
+- LlmProvider.OPENAI.defaultModel = "gpt-5.4" is not a real OpenAI
+  model ID - would 404 if a user picks OpenAI without overriding the
+  model field. Blocks summarization (goal #2), not transcription
+  (goal #1). Needs user input on the correct model name before fixing.
 
 ## Current status (as of this file)
 User reports on real device: no live transcription happening, no
-visible "landing window" for transcripts. Under investigation:
-1. Native lib load failure (System.loadLibrary crash, uncaught -
-   would kill whole app process) - not yet confirmed via logcat
-2. ForegroundListeningService only picks Nemotron-vs-SpeechRecognizer
-   ONCE in onCreate() - if model downloaded after first listen-toggle,
-   stays on old path silently
-3. Transcript IS shown in HeaderCard (top of screen) but it's a single
-   replaceable text line, not a dedicated scrolling transcript view -
-   easy to miss
+visible "landing window" for transcripts. Two independent review
+passes have checked the STT pipeline end-to-end and confirmed all
+previously-known bugs are fixed. The 16KB alignment issue above is
+the most likely remaining root cause but is unconfirmed without
+device logcat access.
 
-Next step: check adb logcat for UnsatisfiedLinkError/crash while
-toggling listening, confirm which of the above is the real cause.
+Next step: get an adb logcat capture from the actual S25 Ultra while
+toggling listening (grep for NemotronJNI/UnsatisfiedLinkError/
+AndroidRuntime) to confirm or rule out the 16KB alignment theory.
 
 ## Standing workflow
 After every build/fix: build -> verify APK -> push source+APK to GitHub
