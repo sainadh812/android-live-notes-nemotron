@@ -3,6 +3,7 @@ package com.sainadh.livenotes.ai
 import com.sainadh.livenotes.data.ApiKeyStore
 import com.sainadh.livenotes.data.DailyNote
 import com.sainadh.livenotes.data.NotesRepository
+import com.sainadh.livenotes.stt.TranscriptUpdate
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.StateFlow
@@ -19,13 +20,10 @@ class ConversationOrchestrator(
     fun retrySummary() = scheduler.retryFailed()
 
     /** Persist before returning; network work belongs to the application scope. */
-    suspend fun onTranscript(text: String, isFinal: Boolean, timestampMs: Long = System.currentTimeMillis()): Result<Unit> {
-        val cleaned = text.trim()
-        if (cleaned.isBlank()) return Result.success(Unit)
+    suspend fun onTranscript(recordingId: String, update: TranscriptUpdate, timestampMs: Long = System.currentTimeMillis()): Result<Unit> {
         return try {
-            val dateKey = repository.dateKey(timestampMs)
-            repository.appendTranscript(dateKey, cleaned, isFinal, timestampMs)
-            scheduler.request(dateKey, isFinal)
+            val dateKey = repository.saveTranscript(recordingId, update, timestampMs)
+            scheduler.request(dateKey, update.endsUtterance)
             Result.success(Unit)
         } catch (cancelled: CancellationException) {
             throw cancelled
@@ -40,7 +38,10 @@ class ConversationOrchestrator(
         val provider = apiKeyStore.readProvider()
         val existing = repository.getNote(dateKey)
         val recent = repository.transcriptForSummary(dateKey, existing?.updatedAtEpochMs ?: 0L)
-        val window = recent.joinToString("\n") { "[${if (it.isFinal) "final" else "partial"}] ${it.text}" }
+        val segments = repository.pendingSegments(dateKey)
+        val legacyWindow = recent.joinToString("\n") { "[legacy ${if (it.isFinal) "final" else "partial"}] ${it.text}" }
+        val segmentWindow = formatTranscriptSegments(segments)
+        val window = listOf(legacyWindow, segmentWindow).filter { it.isNotBlank() }.joinToString("\n")
         if (window.isBlank()) return Result.success(Unit)
         val result = chatCompletionClient.summarizeConversation(
             LlmSummaryRequest(
@@ -58,14 +59,18 @@ class ConversationOrchestrator(
             return Result.failure(error)
         }
         val summary = result.getOrThrow()
-        repository.upsertNote(
+        repository.saveSummary(
             DailyNote(
                 dateKey = dateKey,
                 summary = summary.summary,
                 runningContext = summary.runningContext,
                 actionItems = summary.actionItems,
-                updatedAtEpochMs = recent.last().createdAtEpochMs
-            )
+                updatedAtEpochMs = maxOf(
+                    existing?.updatedAtEpochMs ?: 0L,
+                    recent.maxOfOrNull { it.createdAtEpochMs } ?: 0L,
+                    segments.maxOfOrNull { it.updatedAtEpochMs } ?: 0L
+                )
+            ), segments, recent.map { it.id }
         )
         return Result.success(Unit)
     }

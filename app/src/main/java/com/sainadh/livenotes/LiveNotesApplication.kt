@@ -25,10 +25,7 @@ class AppContainer(application: Application) {
     private val summaryScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val database = NotesDatabase.build(application)
     private val apiKeyStore = ApiKeyStore(application)
-    private val notesRepository = NotesRepository(
-        dailyNoteDao = database.dailyNoteDao(),
-        transcriptChunkDao = database.transcriptChunkDao()
-    )
+    private val notesRepository = NotesRepository(database)
 
     val chatCompletionClient = ChatCompletionClient()
 

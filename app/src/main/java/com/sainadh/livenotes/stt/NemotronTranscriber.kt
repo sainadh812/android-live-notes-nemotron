@@ -7,7 +7,10 @@ import android.media.MediaRecorder
 import android.os.Handler
 import android.os.Looper
 import java.io.File
+import java.util.concurrent.ArrayBlockingQueue
+import java.util.concurrent.CountDownLatch
 import java.util.concurrent.Executors
+import java.util.concurrent.TimeUnit
 
 /**
  * On-device streaming ASR using transcribe.cpp + NVIDIA's
@@ -98,11 +101,29 @@ class NemotronTranscriber(
         Thread(task, "nemotron-worker")
     }
 
-    // Only the worker accesses the native session and AudioRecord. In particular,
-    // stopping never frees a session that nativeInit/nativeFeedPcm is still using.
+    private val captureWorker = Executors.newSingleThreadExecutor { task ->
+        Thread(task, "nemotron-microphone")
+    }
+
+    // Only worker accesses the native handle; only captureWorker owns AudioRecord.
+    // Inference cannot delay microphone reads or microphone shutdown.
     private var handle = 0L
     private val sampleRateHz = 16000
     private val chunkFrames = sampleRateHz / 2
+
+    private class Capture {
+        // Ten seconds of 16 kHz float PCM (640 KB), regardless of recording length.
+        val chunks = ArrayBlockingQueue<FloatArray>(20)
+        val finished = CountDownLatch(1)
+        @Volatile var failure: String? = null
+
+        fun enqueue(pcm: FloatArray) {
+            check(chunks.offer(pcm)) {
+                "Transcription could not keep up with the microphone (10 seconds of queued audio). " +
+                    "Recording stopped; some recent audio could not be saved. Try a smaller model."
+            }
+        }
+    }
 
     /** Starts once; another start is accepted after the stopped callback. */
     fun start() {
@@ -115,7 +136,8 @@ class NemotronTranscriber(
     }
 
     /**
-     * Requests cancellation without waiting on model loading or inference.
+     * Stops capture without waiting on model loading or inference. Queued audio
+     * and the microphone tail are drained before the stream is finalized.
      * The final transcript precedes the stopped callback, which signals that
      * capture and finalization have finished. Repeated pending stops coalesce.
      */
@@ -126,7 +148,7 @@ class NemotronTranscriber(
                 State.IDLE -> {
                     state = State.STOPPING
                     val session = generation
-                    worker.execute { complete(session, null, "") }
+                    worker.execute { complete(session, null, null) }
                 }
                 State.STARTING, State.LISTENING -> state = State.STOPPING
             }
@@ -140,6 +162,7 @@ class NemotronTranscriber(
             state = State.DESTROYED
             worker.execute { releaseHandle() }
             worker.shutdown()
+            captureWorker.shutdown()
         }
     }
 
@@ -160,12 +183,12 @@ class NemotronTranscriber(
     }
 
     private fun runSession(session: Long) {
-        var record: AudioRecord? = null
+        val capture = Capture()
+        var captureStarted = false
         var streamOpened = false
         var failure: String? = null
-        var finalText = ""
-        val pcm16 = ShortArray(chunkFrames)
-        var bufferedFrames = 0
+        var finalUpdate: TranscriptUpdate? = null
+        val segments = NativeTranscriptSegments()
         try {
             if (!wantsCapture(session)) return
             check(nativeLibsLoaded) {
@@ -183,8 +206,66 @@ class NemotronTranscriber(
                 }
             }
             streamOpened = true
-            if (!wantsCapture(session)) return
+            synchronized(stateLock) {
+                if (!wantsCapture(session)) return
+                captureWorker.execute { runCapture(session, capture) }
+                captureStarted = true
+            }
 
+            while (capture.finished.count != 0L || capture.chunks.isNotEmpty()) {
+                if (isDestroyed()) break
+                val pcm = capture.chunks.poll(20, TimeUnit.MILLISECONDS) ?: continue
+                val result = nativeFeedPcm(handle, pcm)
+                segments.update(result).forEach { update -> postTranscript(session, update) }
+            }
+        } catch (error: Throwable) {
+            failure = describeFailure(error)
+        } finally {
+            synchronized(stateLock) {
+                if (state != State.DESTROYED) state = State.STOPPING
+            }
+            // The mic owner stops independently even when nativeFeedPcm is slow.
+            // Never release a native session until its actual call has returned.
+            if (captureStarted) capture.finished.await()
+            if (streamOpened && failure == null && !isDestroyed()) {
+                try {
+                    // Capture errors still preserve all audio accepted before the error.
+                    finalUpdate = segments.finish(nativeFinalizeStream(handle))
+                } catch (error: Throwable) {
+                    failure = describeFailure(error)
+                }
+            }
+            failure = failure ?: capture.failure
+            if (streamOpened && failure != null && finalUpdate == null) {
+                finalUpdate = segments.interrupted()
+            }
+            if (failure != null || isDestroyed()) {
+                val cleanupFailure = releaseHandle()
+                failure = failure ?: cleanupFailure
+            }
+            complete(session, failure, finalUpdate)
+        }
+    }
+
+    private fun runCapture(session: Long, capture: Capture) {
+        var record: AudioRecord? = null
+        val pcm16 = ShortArray(chunkFrames)
+        var bufferedFrames = 0
+        fun read(mic: AudioRecord, maxFrames: Int = chunkFrames): Int {
+            val n = mic.read(
+                pcm16, bufferedFrames, minOf(chunkFrames - bufferedFrames, maxFrames),
+                AudioRecord.READ_NON_BLOCKING
+            )
+            check(n >= 0) { "Microphone read failed ($n)" }
+            bufferedFrames += n
+            if (bufferedFrames == chunkFrames) {
+                capture.enqueue(toFloatPcm(pcm16, bufferedFrames))
+                bufferedFrames = 0
+            }
+            return n
+        }
+        try {
+            if (!wantsCapture(session)) return
             val minBufBytes = AudioRecord.getMinBufferSize(
                 sampleRateHz, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT
             )
@@ -200,8 +281,6 @@ class NemotronTranscriber(
             }
             record = mic
             check(mic.state == AudioRecord.STATE_INITIALIZED) { "AudioRecord failed to initialize" }
-            // Serialize this short transition with stop/destroy so cancellation
-            // cannot return and then allow a pending microphone start.
             synchronized(stateLock) {
                 if (!wantsCapture(session)) return
                 mic.startRecording()
@@ -211,68 +290,58 @@ class NemotronTranscriber(
                 state = State.LISTENING
             }
             postActive(session) { listener.onStateChanged("listening") }
-
-            var lastFullText = ""
             while (wantsCapture(session)) {
-                // Polling avoids a blocking read that would need a different
-                // thread to stop/release the microphone. Preserve 500 ms chunks.
-                val n = mic.read(
-                    pcm16, bufferedFrames, chunkFrames - bufferedFrames,
-                    AudioRecord.READ_NON_BLOCKING
-                )
-                check(n >= 0) { "Microphone read failed ($n)" }
-                if (n == 0) {
-                    Thread.sleep(10)
-                    continue
+                if (read(mic) == 0) Thread.sleep(10)
+            }
+            if (!isDestroyed()) {
+                // AudioRecord.stop() can discard unread samples. Drain available
+                // nonblocking reads first, including the last incomplete chunk.
+                // At most two seconds of PCM is read to bound a misbehaving driver.
+                var tailFrames = 0
+                val tailLimit = sampleRateHz * 2
+                while (tailFrames < tailLimit && !isDestroyed()) {
+                    val n = read(mic, tailLimit - tailFrames)
+                    if (n == 0) break
+                    tailFrames += n
                 }
-                bufferedFrames += n
-                if (bufferedFrames < chunkFrames) continue
-                if (!wantsCapture(session)) break
-                val result = nativeFeedPcm(handle, toFloatPcm(pcm16, bufferedFrames))
-                bufferedFrames = 0
-                val parts = result.split('\u0001', limit = 2)
-                val currentText = parts.getOrElse(0) { "" } + parts.getOrElse(1) { "" }
-                if (currentText.isNotEmpty() && currentText != lastFullText) {
-                    lastFullText = currentText
-                    postActive(session) { listener.onTranscript(currentText, isFinal = false) }
+                check(tailFrames < tailLimit) {
+                    "Microphone did not finish draining; recording stopped before all recent audio was saved"
+                }
+                if (bufferedFrames > 0 && !isDestroyed()) {
+                    capture.enqueue(toFloatPcm(pcm16, bufferedFrames))
+                    bufferedFrames = 0
                 }
             }
         } catch (error: Throwable) {
-            failure = describeFailure(error)
+            capture.failure = describeFailure(error)
         } finally {
-            synchronized(stateLock) {
-                if (state != State.DESTROYED) state = State.STOPPING
-            }
-            // Native calls and mic cleanup all run after the actual feed call
-            // returns. There is no timeout after which a live session is freed.
             record?.let { mic ->
                 try {
                     if (mic.recordingState == AudioRecord.RECORDSTATE_RECORDING) mic.stop()
                 } catch (error: Throwable) {
-                    failure = failure ?: describeFailure(error)
+                    capture.failure = capture.failure ?: describeFailure(error)
                 } finally {
                     try {
                         mic.release()
                     } catch (error: Throwable) {
-                        failure = failure ?: describeFailure(error)
+                        capture.failure = capture.failure ?: describeFailure(error)
                     }
                 }
             }
-            if (streamOpened && failure == null && !isDestroyed()) {
+            // Even a read/driver failure must retain samples collected before it.
+            // Queue overflow stays explicit if there is still no room for this tail.
+            if (bufferedFrames > 0 && !isDestroyed()) {
                 try {
-                    if (bufferedFrames > 0) {
-                        nativeFeedPcm(handle, toFloatPcm(pcm16, bufferedFrames))
-                    }
-                    finalText = nativeFinalizeStream(handle)
+                    capture.enqueue(toFloatPcm(pcm16, bufferedFrames))
                 } catch (error: Throwable) {
-                    failure = describeFailure(error)
+                    capture.failure = capture.failure ?: describeFailure(error)
                 }
             }
-            if (failure != null || isDestroyed()) {
-                val cleanupFailure = releaseHandle()
-                failure = failure ?: cleanupFailure
+            synchronized(stateLock) {
+                if (state != State.DESTROYED && generation == session) state = State.STOPPING
             }
-            complete(session, failure, finalText)
+            postSession(session) { listener.onStateChanged("finishing") }
+            capture.finished.countDown()
         }
     }
 
@@ -297,13 +366,25 @@ class NemotronTranscriber(
         }
     }
 
-    private fun complete(session: Long, failure: String?, finalText: String) {
+    private fun postTranscript(session: Long, update: TranscriptUpdate) =
+        postSession(session) { listener.onTranscriptUpdate(update) }
+
+    private fun postSession(session: Long, callback: () -> Unit) {
+        mainHandler.post {
+            synchronized(stateLock) {
+                // Draining after stop may still commit text. Only destroy cancels delivery.
+                if (state != State.DESTROYED && generation == session) callback()
+            }
+        }
+    }
+
+    private fun complete(session: Long, failure: String?, finalUpdate: TranscriptUpdate?) {
         mainHandler.post {
             synchronized(stateLock) {
                 if (state == State.DESTROYED || generation != session) return@post
                 if (failure != null) listener.onError(failure)
                 if (state == State.DESTROYED) return@post
-                if (finalText.isNotBlank()) listener.onTranscript(finalText, isFinal = true)
+                if (finalUpdate != null) listener.onTranscriptUpdate(finalUpdate)
                 if (state == State.DESTROYED) return@post
                 state = State.IDLE
                 listener.onStateChanged("stopped")

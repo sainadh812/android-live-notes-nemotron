@@ -1,18 +1,34 @@
-# Nemotron lifecycle regression tests
+# Nemotron capture and lifecycle regression tests
 
 Run `./scripts/test-transcriber-lifecycle.sh` on Linux with JDK 17, GCC, and a
 Gradle distribution downloaded by `./gradlew --version`. Alternatively set
 `KOTLIN_COMPILER_LIB` to a Kotlin compiler library directory. No Android SDK,
 model download, emulator, or network connection is needed once Gradle exists.
 
-The harness compiles the actual `NemotronTranscriber.kt` with small Android
-and JNI stubs. Gated native calls deterministically exercise cancellation
-during model initialization and inference, duplicate starts/stops, model reuse,
-native restart/init/feed/finalize failures, microphone errors, callback order,
-and suppression of queued callbacks after destruction. A feed is held beyond
-the previous two-second join timeout to guard against freeing an active session.
-JNI calls assert serialization and the PCM input conversion is checked.
+The harness compiles the actual `NemotronTranscriber.kt`, native transcript
+segment assembly, and shared update contract with small Android and JNI stubs.
+Its 21 deterministic scenarios cover:
 
-These tests validate Kotlin lifecycle ordering, cleanup, and error handling.
-They do not exercise Android microphone hardware, the actual native engine,
-ABI compatibility, model accuracy, or performance on a device.
+- Cancellation during model initialization and inference, duplicate starts/stops,
+  model reuse, native restart/init/feed/finalize failures, and microphone errors.
+- Continued microphone reads while a native feed is blocked; microphone release
+  before that inference returns; ordered draining of queued chunks and incomplete
+  audio still in the driver when stop is requested.
+- Explicit bounded-queue overflow and a driver that will not finish draining,
+  preserving accepted audio and reporting the loss before the stopped callback.
+- Preserving an incomplete capture chunk after a read error; marking the latest
+  hypothesis interrupted on native failure; discarding queued work on destroy.
+- Stable complete-word segments, one replaceable tentative tail, exact whitespace
+  and punctuation, empty-tail clearing, and rejection of committed-prefix changes.
+
+A native feed is held beyond the former two-second join timeout to guard against
+freeing an active session. The stubs assert single-owner AudioRecord access,
+serialized JNI calls, exact PCM conversion, consumed sample counts, main-thread
+callbacks, final/error/stopped ordering, and suppression after destruction.
+
+These tests validate Kotlin capture coordination, lifecycle ordering, segment
+assembly, cleanup, and error handling. They do not exercise Android microphone
+hardware, the actual native engine, ABI compatibility, model accuracy, or
+performance on a device. Real-phone capture and sustained inference still need
+measurement; the bounded queue reports excessive inference lag, not every
+possible driver-level audio loss.

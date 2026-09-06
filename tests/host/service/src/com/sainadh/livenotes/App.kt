@@ -3,6 +3,8 @@ import android.app.Application
 import java.io.File
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
+import com.sainadh.livenotes.stt.TranscriptStatus
+import com.sainadh.livenotes.stt.TranscriptUpdate
 class MainActivity
 object R {
     object string {
@@ -28,12 +30,14 @@ class DownloadManager {
 class Settings { fun readAudioInputMode() = "phone" }
 class Orchestrator {
     val writes = java.util.Collections.synchronizedList(mutableListOf<String>())
+    val updates = java.util.Collections.synchronizedList(mutableListOf<Pair<String, TranscriptUpdate>>())
     val entered = CountDownLatch(1)
     var gate: CountDownLatch? = null
-    suspend fun onTranscript(text: String, isFinal: Boolean, timestampMs: Long): Result<Unit> {
+    suspend fun onTranscript(recordingId: String, update: TranscriptUpdate, timestampMs: Long): Result<Unit> {
         entered.countDown()
         check(gate?.await(5, TimeUnit.SECONDS) != false) { "Timed out waiting for test write gate" }
-        writes += "$isFinal:$text"
+        writes += "${update.status == TranscriptStatus.FINAL}:${update.text}"
+        updates += recordingId to update
         return Result.success(Unit)
     }
 }

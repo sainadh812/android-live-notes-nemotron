@@ -1,3 +1,5 @@
+For the newer 1.0.2 capture, retry, and storage changes, see [TRANSCRIPTION_RELIABILITY.md](TRANSCRIPTION_RELIABILITY.md). The build hashes and results below describe the earlier 1.0.1 repair.
+
 Repair completed locally on 2026-09-06, starting from commit `fd3aa35713066483b0f7ff167740c1194e1f2f58`. App version: **1.0.1**, version code **2**.
 
 The Nemotron JNI bridge previously passed zero-sized update structures to feed and finalize. The bundled native engine rejected those calls with error 14. Both structures now use the required initializer, and the rebuilt arm64 JNI library contains those calls. Native errors reach the app as descriptive exceptions. A pinned build script, contract regression tests, and a Gradle source/binary hash check keep the source and shipped library consistent.

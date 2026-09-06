@@ -8,6 +8,8 @@ import com.sainadh.livenotes.audio.BluetoothAudioRouter
 import com.sainadh.livenotes.service.ForegroundListeningService
 import com.sainadh.livenotes.service.ServiceStateTracker
 import com.sainadh.livenotes.stt.NemotronTranscriber
+import com.sainadh.livenotes.stt.TranscriptStatus
+import com.sainadh.livenotes.stt.TranscriptUpdate
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 
@@ -105,6 +107,43 @@ fun main() {
         val notifications = NotificationManager.notifications
         Handler.advance(10_000)
         check(!NotificationManager.active && NotificationManager.notifications == notifications)
+    }
+    scenario("native segments display together but persist as individual revisions") { service ->
+        val listener = NemotronTranscriber.last.listener
+        listener.onTranscriptUpdate(TranscriptUpdate(0, "hel", TranscriptStatus.PARTIAL, false, true))
+        listener.onTranscriptUpdate(TranscriptUpdate(0, "hello ", TranscriptStatus.FINAL, false, true))
+        listener.onTranscriptUpdate(TranscriptUpdate(1, "wor", TranscriptStatus.PARTIAL, false, true))
+        service.onStartCommand(Intent(ForegroundListeningService.ACTION_STOP), 0, 2)
+        listener.onTranscriptUpdate(TranscriptUpdate(1, "world", TranscriptStatus.FINAL, true, true))
+        listener.onStateChanged("stopped")
+        drainUntil { service.stopped }
+        check(ServiceStateTracker.latestTranscript.value == "hello world")
+        val updates = LiveNotesApplication.instance.appContainer.conversationOrchestrator.updates
+        check(updates.map { it.second.segmentId } == listOf(0L, 0L, 1L, 1L))
+        check(updates.map { it.first }.distinct().size == 1)
+        check(updates.last().second.text == "world")
+    }
+    scenario("interrupted OS utterance reaches storage before its retry result", native = false) { service ->
+        val first = SpeechRecognizer.instances.last()
+        first.callback.onPartialResults(android.os.Bundle("send proposal Friday"))
+        first.callback.onError(SpeechRecognizer.ERROR_NETWORK)
+        Handler.advance(1_500)
+        SpeechRecognizer.instances.last().callback.onResults(android.os.Bundle("also book a room"))
+        service.onStartCommand(Intent(ForegroundListeningService.ACTION_STOP), 0, 2)
+        drainUntil { service.stopped }
+        val updates = LiveNotesApplication.instance.appContainer.conversationOrchestrator.updates.map { it.second }
+        check(updates.map { it.status } == listOf(TranscriptStatus.PARTIAL, TranscriptStatus.INTERRUPTED, TranscriptStatus.FINAL))
+        check(updates[0].segmentId == updates[1].segmentId && updates[1].segmentId != updates[2].segmentId)
+        check(ServiceStateTracker.latestTranscript.value == "send proposal Friday\nalso book a room")
+    }
+    scenario("microphone finished state permits queued transcript writes") { service ->
+        val listener = NemotronTranscriber.last.listener
+        listener.onStateChanged("finishing")
+        check(!ServiceStateTracker.listening.value && !service.stopped)
+        listener.onTranscriptUpdate(TranscriptUpdate(0, "drained audio", TranscriptStatus.FINAL, true, true))
+        listener.onStateChanged("stopped")
+        drainUntil { service.stopped }
+        check(LiveNotesApplication.instance.appContainer.conversationOrchestrator.writes == listOf("true:drained audio"))
     }
     println("$passed service lifecycle scenarios passed")
 }

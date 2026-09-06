@@ -16,6 +16,9 @@ class SpeechTranscriber(
 ) {
     interface Listener {
         fun onTranscript(text: String, isFinal: Boolean)
+        fun onTranscriptUpdate(update: TranscriptUpdate) {
+            onTranscript(update.text, update.status == TranscriptStatus.FINAL)
+        }
         fun onStateChanged(state: String)
         fun onError(reason: String)
     }
@@ -29,6 +32,7 @@ class SpeechTranscriber(
     private var generation = 0
     private var consecutiveRecoverableErrors = 0
     private var lastHypothesis = ""
+    private var utteranceId = 0L
     private var restartTask: Runnable? = null
     private var stopTimeout: Runnable? = null
 
@@ -41,25 +45,26 @@ class SpeechTranscriber(
 
     /** Wait for the recognizer's final result before announcing that capture stopped. */
     fun stop() = onMain {
-        if (destroyed || stopping) return@onMain
+        if (destroyed || stopping || !running) return@onMain
         running = false
         stopping = true
         cancelRestart()
         if (!sessionActive) {
-            emitLastHypothesis()
             finishStop()
             return@onMain
         }
         // Some recognition providers never deliver a result after stopListening().
         // Preserve their latest hypothesis and bound the wait in that case.
         stopTimeout = Runnable {
-            emitLastHypothesis()
+            disposeRecognizer()
+            preserveInterruptedHypothesis()
             finishStop()
         }.also { mainHandler.postDelayed(it, 5_000L) }
         try {
             recognizer?.stopListening()
         } catch (_: RuntimeException) {
-            emitLastHypothesis()
+            disposeRecognizer()
+            preserveInterruptedHypothesis()
             finishStop()
         }
     }
@@ -71,6 +76,7 @@ class SpeechTranscriber(
         cancelRestart()
         cancelStopTimeout()
         disposeRecognizer()
+        lastHypothesis = ""
     }
 
     private fun startSession() {
@@ -82,6 +88,7 @@ class SpeechTranscriber(
             }
             disposeRecognizer()
             lastHypothesis = ""
+            utteranceId += 1
             val sessionGeneration = generation
             val currentRecognizer = SpeechRecognizer.createSpeechRecognizer(context)
             recognizer = currentRecognizer
@@ -108,9 +115,11 @@ class SpeechTranscriber(
         }
         override fun onError(error: Int) {
             if (!isCurrent()) return
-            sessionActive = false
+            // An error ends this provider's utterance. Save its latest revision
+            // before a retry clears it, and reject late callbacks during backoff.
+            disposeRecognizer()
+            preserveInterruptedHypothesis()
             if (stopping) {
-                emitLastHypothesis()
                 finishStop()
                 return
             }
@@ -140,27 +149,33 @@ class SpeechTranscriber(
         }
         override fun onResults(results: Bundle?) {
             if (!isCurrent()) return
-            sessionActive = false
+            disposeRecognizer()
             consecutiveRecoverableErrors = 0
-            val text = match(results).ifBlank { lastHypothesis }
-            if (text.isNotBlank()) listener.onTranscript(text, isFinal = true)
-            lastHypothesis = ""
+            val text = match(results)
+            if (text.isNotBlank()) {
+                lastHypothesis = ""
+                emit(text, TranscriptStatus.FINAL)
+            } else {
+                // A blank provider result does not confirm an earlier partial.
+                preserveInterruptedHypothesis()
+            }
             if (stopping) finishStop() else if (running) restartSoon(700L)
         }
         override fun onPartialResults(partialResults: Bundle?) {
             if (!isCurrent() || (!running && !stopping)) return
             val text = match(partialResults)
-            if (text.isNotBlank()) {
+            if (text.isNotBlank() && text != lastHypothesis) {
                 lastHypothesis = text
-                listener.onTranscript(text, isFinal = false)
+                emit(text, TranscriptStatus.PARTIAL)
             }
         }
         override fun onEvent(eventType: Int, params: Bundle?) = Unit
     }
 
     private fun fail(reason: String) {
+        disposeRecognizer()
+        preserveInterruptedHypothesis()
         listener.onError(reason)
-        emitLastHypothesis()
         finishStop()
     }
 
@@ -173,9 +188,14 @@ class SpeechTranscriber(
         listener.onStateChanged("stopped")
     }
 
-    private fun emitLastHypothesis() {
-        if (lastHypothesis.isNotBlank()) listener.onTranscript(lastHypothesis, isFinal = true)
+    private fun preserveInterruptedHypothesis() {
+        val text = lastHypothesis
         lastHypothesis = ""
+        if (text.isNotBlank()) emit(text, TranscriptStatus.INTERRUPTED)
+    }
+
+    private fun emit(text: String, status: TranscriptStatus) {
+        listener.onTranscriptUpdate(TranscriptUpdate(utteranceId, text, status))
     }
 
     private fun disposeRecognizer() {

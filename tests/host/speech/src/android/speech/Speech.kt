@@ -21,12 +21,17 @@ class SpeechRecognizer {
     fun startListening(intent: Intent) {
         if (failStart) throw IllegalStateException("Provider rejected start")
     }
-    fun stopListening() { stopped = true }
-    fun cancel() { }
+    fun stopListening() {
+        stopped = true
+        if (failStop) throw IllegalStateException("Provider rejected stop")
+    }
+    fun cancel() { if (callbackOnCancel) callback.onError(ERROR_CLIENT) }
     fun destroy() { destroyed = true }
     companion object {
         var available = true
         var failStart = false
+        var failStop = false
+        var callbackOnCancel = false
         val instances = mutableListOf<SpeechRecognizer>()
         fun isRecognitionAvailable(context: Context) = available
         fun createSpeechRecognizer(context: Context) = SpeechRecognizer().also { instances += it }

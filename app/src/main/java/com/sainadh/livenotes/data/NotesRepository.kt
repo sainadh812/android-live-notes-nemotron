@@ -3,6 +3,8 @@ package com.sainadh.livenotes.data
 import java.time.LocalDate
 import java.time.Instant
 import java.time.ZoneId
+import androidx.room.withTransaction
+import com.sainadh.livenotes.stt.TranscriptUpdate
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
 import kotlinx.serialization.builtins.ListSerializer
@@ -26,10 +28,12 @@ data class TranscriptChunk(
 )
 
 class NotesRepository(
-    private val dailyNoteDao: DailyNoteDao,
-    private val transcriptChunkDao: TranscriptChunkDao,
+    private val database: NotesDatabase,
     private val json: Json = Json
 ) {
+    private val dailyNoteDao = database.dailyNoteDao()
+    private val transcriptChunkDao = database.transcriptChunkDao()
+    private val segmentDao = database.transcriptSegmentDao()
     fun observeToday(): Flow<DailyNote?> = dailyNoteDao.observeOne(todayKey()).map { it?.toModel(json) }
 
     fun observeAll(): Flow<List<DailyNote>> = dailyNoteDao.observeAll().map { list ->
@@ -38,15 +42,19 @@ class NotesRepository(
 
     suspend fun getNote(dateKey: String): DailyNote? = dailyNoteDao.getOne(dateKey)?.toModel(json)
 
-    suspend fun appendTranscript(dateKey: String, text: String, isFinal: Boolean, timestampMs: Long) {
-        transcriptChunkDao.insert(
-            TranscriptChunkEntity(
-                dateKey = dateKey,
-                text = text,
-                isFinal = isFinal,
-                createdAtEpochMs = timestampMs
-            )
-        )
+    suspend fun saveTranscript(recordingId: String, update: TranscriptUpdate, timestampMs: Long): String =
+        segmentDao.save(recordingId, update, dateKey(timestampMs), timestampMs)
+
+    suspend fun pendingSegments(dateKey: String): List<TranscriptSegmentEntity> = segmentDao.pendingSummary(dateKey)
+
+    suspend fun saveSummary(note: DailyNote, segments: List<TranscriptSegmentEntity>, legacyIds: List<Long>) {
+        database.withTransaction {
+            upsertNote(note)
+            // Only acknowledge exactly the revisions included in this AI request.
+            // A partial revised while the request was running stays pending.
+            segments.forEach { segmentDao.markSummarized(it.recordingId, it.segmentId, it.revision) }
+            if (legacyIds.isNotEmpty()) transcriptChunkDao.markSummarized(legacyIds)
+        }
     }
 
     suspend fun recentTranscript(dateKey: String, limit: Int = 12): List<TranscriptChunk> {

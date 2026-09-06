@@ -7,6 +7,8 @@ Android app in Kotlin for live speech transcription, daily notes, and AI summari
 - A foreground service supports phone and Bluetooth microphones, including capture with the screen off.
 - Room stores transcript chunks and daily notes locally. OpenAI, DeepSeek, or Qwen can summarize text using the user's API key.
 - Partial transcripts schedule a summary at most once per 30-second interval. Final results request a prompt refresh; updates arriving during a request are coalesced. Failed summaries expose a Retry summary action.
+- Microphone capture runs independently of native inference, with a bounded 10-second queue. Stop drains accepted audio before finalizing. Overload stops capture with a visible error.
+- New recordings store stable transcript segments and update one tentative segment. Interrupted Android recognizer results are preserved with an explicit uncertain status before retries. Existing notes survive the database upgrade.
 
 ## Build and test
 
@@ -16,7 +18,7 @@ Install JDK 17 and the Android SDK with platform 35, build tools 34.0.0, and NDK
 ./gradlew :app:testDebugUnitTest :app:lintDebug :app:assembleDebug
 ```
 
-The debug APK is `app/build/outputs/apk/debug/app-debug.apk`. The current app version is 1.0.1 (version code 2). Windows users can invoke the same tasks with `gradlew.bat`.
+The debug APK is `app/build/outputs/apk/debug/app-debug.apk`. The current app version is 1.0.2 (version code 3). Windows users can invoke the same tasks with `gradlew.bat`.
 
 For a phone trial alongside an older installation, build with `-PpreviewBuild=true`:
 
@@ -24,7 +26,7 @@ For a phone trial alongside an older installation, build with `-PpreviewBuild=tr
 ./gradlew :app:assembleDebug -PpreviewBuild=true
 ```
 
-This produces **LiveMeetingNotes Preview** with package `com.sainadh.livenotes.preview`, separate notes/settings/models, and version 1.0.1-preview. It avoids signing-key conflicts with older APKs. Download a model again inside the preview app to test Nemotron; the original app and its data are preserved.
+This produces **LiveMeetingNotes Preview** with package `com.sainadh.livenotes.preview`, separate notes/settings/models, and version 1.0.2-preview. The published 1.0.2 Preview uses the same signing key as 1.0.1 Preview and installs over it, preserving its notes and models. The original non-Preview app remains a separate installation.
 
 Network-specific Gradle proxy settings belong in your personal `~/.gradle/gradle.properties`; the repository does not force a corporate proxy.
 
@@ -57,3 +59,5 @@ The native and Kotlin host checks use controlled test doubles and validate the a
 ## Validation limits
 
 The JNI update-initialization defect and asynchronous shutdown races have regression coverage. Native library segments support 16 KB pages. Real microphone routing, recognition quality, performance, and background behavior still need validation on a physical phone with a valid model. Models are downloaded separately and are not bundled in the APK. This build targets arm64; an x86 emulator cannot execute the bundled native engine.
+
+See [transcription reliability changes](TRANSCRIPTION_RELIABILITY.md) for capture buffering, retry recovery, storage migration, and remaining limits.

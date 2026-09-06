@@ -23,6 +23,7 @@ java -cp "$TASK_KOTLIN_LIB/*" org.jetbrains.kotlin.cli.jvm.K2JVMCompiler \
     -no-stdlib -no-reflect -jvm-target 17 \
     -classpath "${TASK_STDLIB[0]}" -d "$TASK_BUILD_DIR/classes" \
     "$TASK_REPO_ROOT"/tests/host/speech/src/android/{content,os,speech}/*.kt \
+    "$TASK_REPO_ROOT/app/src/main/java/com/sainadh/livenotes/stt/TranscriptUpdate.kt" \
     "$TASK_REPO_ROOT/app/src/main/java/com/sainadh/livenotes/stt/SpeechTranscriber.kt" \
     "$TASK_REPO_ROOT/tests/host/speech/src/SpeechLifecycleTest.kt"
 timeout 30s java -cp "$TASK_BUILD_DIR/classes:${TASK_STDLIB[0]}" SpeechLifecycleTestKt

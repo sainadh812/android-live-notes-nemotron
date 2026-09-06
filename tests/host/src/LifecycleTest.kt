@@ -4,6 +4,9 @@ import android.os.Handler
 import check.Gate
 import com.sainadh.livenotes.stt.NemotronTranscriber
 import com.sainadh.livenotes.stt.SpeechTranscriber
+import com.sainadh.livenotes.stt.NativeTranscriptSegments
+import com.sainadh.livenotes.stt.TranscriptStatus
+import com.sainadh.livenotes.stt.TranscriptUpdate
 import java.io.File
 import java.util.concurrent.TimeUnit
 
@@ -21,6 +24,7 @@ fun main(args: Array<String>) {
     val scenario = args.single()
     val mainThread = Thread.currentThread()
     val events = mutableListOf<String>()
+    val updates = mutableListOf<TranscriptUpdate>()
     val model = File.createTempFile("stub-model", ".gguf")
     val transcriber = NemotronTranscriber(Context(), model.path, listener = object : SpeechTranscriber.Listener {
         private fun event(value: String) {
@@ -29,7 +33,11 @@ fun main(args: Array<String>) {
         }
         override fun onStateChanged(state: String) = event(state)
         override fun onError(reason: String) = event("error:$reason")
-        override fun onTranscript(text: String, isFinal: Boolean) = event("${if (isFinal) "final" else "partial"}:$text")
+        override fun onTranscript(text: String, isFinal: Boolean) = error("Legacy cumulative callback used")
+        override fun onTranscriptUpdate(update: TranscriptUpdate) {
+            updates += update
+            event("${update.status.name.lowercase()}:${update.text}")
+        }
     })
     fun stopCount() = events.count { it == "stopped" }
     fun startAndFeed() {
@@ -77,12 +85,13 @@ fun main(args: Array<String>) {
                     promptly { transcriber.stop() }
                     Thread.sleep(2100) // Regression: old join(2000) freed an active session.
                     Handler.drain()
+                    check(AudioRecord.releases.get() == 1) { "Slow inference kept the microphone open" }
                     check(Gate.finalizes.get() == 0 && Gate.destroys.get() == 0)
                     check(stopCount() == 0)
                     Gate.release.countDown()
                     await("final transcript and stop") { stopCount() == 1 }
                     check(events.indexOf("final:final transcript") < events.indexOf("stopped"))
-                    check(events.none { it.startsWith("partial:") }) { "Late partial delivered after stop" }
+                    check(events.last() == "stopped") { "Transcript delivered after stop completed" }
                 } else {
                     val before = events.size
                     promptly { transcriber.destroy() }
@@ -92,6 +101,119 @@ fun main(args: Array<String>) {
                     check(events.size == before) { "Callback delivered after destruction" }
                 }
                 check(AudioRecord.releases.get() == 1)
+            }
+            "slow-feed-queue", "queued-tail", "destroy-queue" -> {
+                Gate.blockOperation = "feed"
+                AudioRecord.availableFrames.set(4 * 8000)
+                if (scenario == "queued-tail") {
+                    AudioRecord.availableFrames.set(3 * 8000 + 1000)
+                    Gate.blockEmptyRead = true
+                }
+                startAndFeed()
+                if (scenario == "queued-tail") {
+                    check(Gate.readEntered.await(5, TimeUnit.SECONDS))
+                    // This audio is still in the driver when stop is requested.
+                    promptly { transcriber.stop() }
+                    AudioRecord.availableFrames.addAndGet(123)
+                    Gate.readRelease.countDown()
+                } else {
+                    await("capture continued during blocked inference") { AudioRecord.readFrames.get() == 4 * 8000 }
+                    if (scenario == "destroy-queue") promptly { transcriber.destroy() }
+                    else promptly { transcriber.stop() }
+                }
+                await("mic released before inference returns") { AudioRecord.releases.get() == 1 }
+                check(Gate.feeds.get() == 1 && Gate.finalizes.get() == 0 && Gate.destroys.get() == 0)
+                val beforeRelease = events.size
+                Gate.release.countDown()
+                if (scenario == "destroy-queue") {
+                    await("destroy after queued capture") { Gate.destroys.get() == 1 }
+                    check(Gate.feeds.get() == 1 && Gate.finalizes.get() == 0)
+                    check(events.size == beforeRelease)
+                } else {
+                    await("queued audio drained") { stopCount() == 1 }
+                    check(Gate.feeds.get() == 4)
+                    check(Gate.feedFrames.get() == AudioRecord.readFrames.get()) { "Captured samples were lost" }
+                    if (scenario == "queued-tail") check(Gate.feedSizes.last() == 1123)
+                    check(Gate.finalizes.get() == 1 && events.last() == "stopped")
+                }
+            }
+            "read-error-tail" -> {
+                AudioRecord.availableFrames.set(1000)
+                Gate.audioFailure = "read-after-tail"
+                transcriber.start()
+                await("read error preserves buffered samples") { stopCount() == 1 }
+                check(Gate.feedFrames.get() == 1000 && Gate.feeds.get() == 1)
+                check(Gate.finalizes.get() == 1 && Gate.destroys.get() == 1)
+                check(events.single { it.startsWith("error:") }.contains("Microphone read failed"))
+                check(events.last() == "stopped")
+            }
+            "feed-error-partial" -> {
+                startAndFeed()
+                await("first hypothesis") { updates.any { it.text == "tentative" } }
+                Gate.failOperation = "feed"
+                AudioRecord.availableFrames.addAndGet(8000)
+                await("feed error preserves tentative text") { stopCount() == 1 }
+                check(updates.last().status == TranscriptStatus.INTERRUPTED && updates.last().text == "tentative")
+                check(Gate.finalizes.get() == 0 && Gate.destroys.get() == 1)
+            }
+            "tail-limit" -> {
+                Gate.blockOperation = "feed"
+                Gate.blockEmptyRead = true
+                startAndFeed()
+                check(Gate.readEntered.await(5, TimeUnit.SECONDS))
+                promptly { transcriber.stop() }
+                AudioRecord.availableFrames.addAndGet(20 * 8000)
+                Gate.readRelease.countDown()
+                await("bounded tail drain releases mic") { AudioRecord.releases.get() == 1 }
+                check(AudioRecord.readFrames.get() == 5 * 8000)
+                Gate.release.countDown()
+                await("tail limit finalizes captured samples") { stopCount() == 1 }
+                check(Gate.feedFrames.get() == AudioRecord.readFrames.get())
+                check(events.single { it.startsWith("error:") }.contains("did not finish draining"))
+            }
+            "overflow" -> {
+                Gate.blockOperation = "feed"
+                startAndFeed()
+                // Fill the queue only after one native call is definitely in flight.
+                AudioRecord.availableFrames.addAndGet(30 * 8000)
+                await("overflow stops microphone") { AudioRecord.releases.get() == 1 }
+                check(Gate.feeds.get() == 1 && Gate.finalizes.get() == 0)
+                check(AudioRecord.readFrames.get() == 22 * 8000)
+                Gate.release.countDown()
+                await("overflow drains accepted queue") { stopCount() == 1 }
+                check(Gate.feeds.get() == 21 && Gate.feedFrames.get() == 21 * 8000)
+                check(Gate.finalizes.get() == 1 && Gate.destroys.get() == 1)
+                check(events.single { it.startsWith("error:") }.contains("could not keep up"))
+                check(events.indexOfFirst { it.startsWith("error:") } < events.indexOf("final:final transcript"))
+                check(events.last() == "stopped")
+            }
+            "segments" -> {
+                val assembler = NativeTranscriptSegments()
+                val saved = linkedMapOf<Long, TranscriptUpdate>()
+                fun accept(batch: List<TranscriptUpdate>) = batch.forEach { saved[it.segmentId] = it }
+                accept(assembler.update("Hello\u0001 wor"))
+                check(saved[0L]?.text == "Hello wor")
+                accept(assembler.update("Hello \u0001world"))
+                check(saved[0L] == TranscriptUpdate(0, "Hello ", TranscriptStatus.FINAL, false, true))
+                accept(assembler.update("Hello world\u0001!"))
+                check(saved[1L]?.text == "world!")
+                accept(assembler.update("Hello world \u0001again"))
+                check(saved[1L]?.text == "world ")
+                val ending = assembler.finish("Hello world again.")
+                accept(listOf(ending))
+                check(saved.values.joinToString("") { it.text } == "Hello world again.")
+                check(saved.values.all { it.status == TranscriptStatus.FINAL && it.appendToPrevious })
+                check(!saved.getValue(0L).endsUtterance && ending.endsUtterance)
+                val interrupted = NativeTranscriptSegments()
+                interrupted.update("committed \u0001unfinished")
+                check(interrupted.interrupted() == TranscriptUpdate(1, "unfinished", TranscriptStatus.INTERRUPTED, true, true))
+                check(runCatching { interrupted.update("changed \u0001text") }.exceptionOrNull()?.message?.contains("changed already committed") == true)
+                check(runCatching { interrupted.finish("changed final") }.isFailure)
+                check(interrupted.interrupted().text == "unfinished")
+                val cleared = NativeTranscriptSegments()
+                cleared.update("\u0001uncertain")
+                check(cleared.update("\u0001").single().text.isEmpty())
+                check(cleared.finish("").endsUtterance)
             }
             "restart" -> {
                 startAndFeed()
@@ -125,6 +247,7 @@ fun main(args: Array<String>) {
                 check(events.any { it.contains("native ${Gate.failOperation} failed") })
                 check(events.indexOfFirst { it.startsWith("error:") } < events.indexOf("stopped"))
                 if (scenario != "init-failure") check(Gate.destroys.get() == 1)
+                if (scenario == "finalize-failure") check(updates.last().status == TranscriptStatus.INTERRUPTED && updates.last().text == "tentative")
             }
             "audio-init", "audio-start", "audio-read" -> {
                 Gate.audioFailure = scenario.removePrefix("audio-")
@@ -146,6 +269,7 @@ fun main(args: Array<String>) {
         println("PASS $scenario")
     } finally {
         Gate.release.countDown()
+        Gate.readRelease.countDown()
         transcriber.destroy()
         model.delete()
     }

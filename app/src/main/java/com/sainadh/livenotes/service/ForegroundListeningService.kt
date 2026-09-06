@@ -18,6 +18,9 @@ import com.sainadh.livenotes.R
 import com.sainadh.livenotes.audio.BluetoothAudioRouter
 import com.sainadh.livenotes.stt.NemotronTranscriber
 import com.sainadh.livenotes.stt.SpeechTranscriber
+import com.sainadh.livenotes.stt.TranscriptStatus
+import com.sainadh.livenotes.stt.TranscriptUpdate
+import java.util.UUID
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -128,11 +131,32 @@ class ForegroundListeningService : Service() {
     }
 
     private fun callbacks(sessionGeneration: Int) = object : SpeechTranscriber.Listener {
+        private val recordingId = UUID.randomUUID().toString()
+        private val displaySegments = sortedMapOf<Long, TranscriptUpdate>()
+        private var legacySegmentId = 0L
         private fun acceptsCallbacks() = generation == sessionGeneration &&
             (phase == Phase.LISTENING || phase == Phase.STOPPING)
 
         override fun onTranscript(text: String, isFinal: Boolean) {
+            // Compatibility for listener clients that have not adopted segment events.
+            onTranscriptUpdate(TranscriptUpdate(legacySegmentId, text,
+                if (isFinal) TranscriptStatus.FINAL else TranscriptStatus.PARTIAL))
+            if (isFinal) legacySegmentId += 1L
+        }
+
+        override fun onTranscriptUpdate(update: TranscriptUpdate) {
             if (!acceptsCallbacks()) return
+            val previousSegment = displaySegments[update.segmentId]
+            if (previousSegment != null && previousSegment.status != TranscriptStatus.PARTIAL) return
+            displaySegments[update.segmentId] = update
+            val text = buildString {
+                displaySegments.values.forEach { segment ->
+                    if (segment.text.isNotEmpty()) {
+                        if (isNotEmpty() && !segment.appendToPrevious) append('\n')
+                        append(segment.text)
+                    }
+                }
+            }
             ServiceStateTracker.latestTranscript.value = text
             val timestampMs = System.currentTimeMillis()
             val previous = lastTranscriptJob
@@ -141,7 +165,7 @@ class ForegroundListeningService : Service() {
                 try {
                     val app = application as LiveNotesApplication
                     val result = withContext(Dispatchers.IO) {
-                        app.appContainer.conversationOrchestrator.onTranscript(text, isFinal, timestampMs)
+                        app.appContainer.conversationOrchestrator.onTranscript(recordingId, update, timestampMs)
                     }
                     result.exceptionOrNull()?.let {
                         ServiceStateTracker.lastTranscriptionError.value =
@@ -161,6 +185,10 @@ class ForegroundListeningService : Service() {
             if (!acceptsCallbacks()) return
             if (state == "stopped") {
                 finishCapture(sessionGeneration)
+            } else if (state == "finishing") {
+                phase = Phase.STOPPING
+                ServiceStateTracker.listening.value = false
+                updateNotification("Finishing transcription")
             } else if (phase == Phase.LISTENING) {
                 if (state == "ready") ServiceStateTracker.lastTranscriptionError.value = null
                 updateNotification(state)
