@@ -3,9 +3,8 @@
  *
  * JNI bridge between Kotlin (com.sainadh.livenotes.stt.NemotronTranscriber)
  * and transcribe.cpp's public C API, for on-device streaming ASR using
- * NVIDIA's nemotron-3.5-asr-streaming-0.6b (or any other transcribe.cpp
- * "parakeet family" streaming GGUF model - nemotron-speech-streaming-en-0.6b
- * works identically).
+ * NVIDIA Nemotron and Useful Sensors Moonshine Streaming GGUF models.
+ * The loaded model capabilities select the language and family extension.
  *
  * Model of use from Kotlin:
  *   val handle = nativeInit(modelPath, "en-US")   // loads model + opens stream
@@ -23,10 +22,14 @@
 #include <memory>
 #include <cstdio>
 #include <new>
+#include <cstring>
+#include <vector>
+#include <limits>
 #include <android/log.h>
 
 #include "transcribe.h"
 #include "transcribe/parakeet.h"
+#include "transcribe/moonshine_streaming.h"
 
 #define LOG_TAG "NemotronJNI"
 #define LOGI(...) __android_log_print(ANDROID_LOG_INFO, LOG_TAG, __VA_ARGS__)
@@ -55,11 +58,6 @@ struct NativeSession {
     }
 };
 
-jstring makeJString(JNIEnv * env, const char * s) {
-    if (!s) s = "";
-    return env->NewStringUTF(s);
-}
-
 void throwJavaError(JNIEnv * env, const char * message,
                     const char * type = "java/lang/IllegalStateException") {
     LOGE("%s", message);
@@ -76,6 +74,121 @@ void throwNativeError(JNIEnv * env, const char * operation, transcribe_status st
     std::snprintf(message, sizeof(message), "%s failed: %s (status=%d)",
                   operation, transcribe_status_string(status), static_cast<int>(status));
     throwJavaError(env, message);
+}
+
+// Engine text is standard UTF-8. NewStringUTF accepts Modified UTF-8 and
+// CheckJNI can abort on supplementary code points, so construct UTF-16 instead.
+jstring makeJString(JNIEnv * env, const char * text) {
+    if (text == nullptr) text = "";
+    const size_t length = std::strlen(text);
+    if (length > static_cast<size_t>(std::numeric_limits<jsize>::max())) {
+        throwJavaError(env, "Speech transcript exceeds the Java string limit");
+        return nullptr;
+    }
+    try {
+        std::vector<jchar> units;
+        units.reserve(length);
+        const auto * bytes = reinterpret_cast<const unsigned char *>(text);
+        for (size_t position = 0; position < length;) {
+            const auto first = bytes[position];
+            uint32_t codepoint = first;
+            size_t count = 1;
+            uint32_t minimum = 0;
+            bool valid = first < 0x80;
+            if (first >= 0xC2 && first <= 0xDF) {
+                count = 2; minimum = 0x80; codepoint = first & 0x1F; valid = true;
+            } else if (first >= 0xE0 && first <= 0xEF) {
+                count = 3; minimum = 0x800; codepoint = first & 0x0F; valid = true;
+            } else if (first >= 0xF0 && first <= 0xF4) {
+                count = 4; minimum = 0x10000; codepoint = first & 0x07; valid = true;
+            }
+            valid = valid && count <= length - position;
+            for (size_t i = 1; valid && i < count; ++i) {
+                const auto next = bytes[position + i];
+                if ((next & 0xC0) != 0x80) valid = false;
+                else codepoint = (codepoint << 6) | (next & 0x3F);
+            }
+            valid = valid && codepoint >= minimum && codepoint <= 0x10FFFF &&
+                !(codepoint >= 0xD800 && codepoint <= 0xDFFF);
+            if (!valid) {
+                // Consume one invalid byte at a time, preserving following text.
+                units.push_back(0xFFFD);
+                ++position;
+                continue;
+            }
+            position += count;
+            if (codepoint <= 0xFFFF) {
+                units.push_back(static_cast<jchar>(codepoint));
+            } else {
+                codepoint -= 0x10000;
+                units.push_back(static_cast<jchar>(0xD800 + (codepoint >> 10)));
+                units.push_back(static_cast<jchar>(0xDC00 + (codepoint & 0x3FF)));
+            }
+        }
+        const jchar empty = 0;
+        return env->NewString(units.empty() ? &empty : units.data(), static_cast<jsize>(units.size()));
+    } catch (const std::bad_alloc &) {
+        throwJavaError(env, "Unable to allocate speech transcript", "java/lang/OutOfMemoryError");
+        return nullptr;
+    }
+}
+
+// Locale tags differ between model families: multilingual Nemotron accepts
+// en-US; the English checkpoints publish en. Prefer an exact match, then the
+// explicitly advertised language subtag. Unknown languages remain errors.
+const char * modelLanguage(const transcribe_capabilities & caps, const char * requested) {
+    if (requested == nullptr || caps.languages == nullptr) return requested;
+    for (int i = 0; i < caps.n_languages; ++i) {
+        if (caps.languages[i] && std::strcmp(caps.languages[i], requested) == 0) return caps.languages[i];
+    }
+    const char * separator = std::strchr(requested, '-');
+    if (separator != nullptr) {
+        const auto length = static_cast<size_t>(separator - requested);
+        for (int i = 0; i < caps.n_languages; ++i) {
+            const char * candidate = caps.languages[i];
+            if (candidate && std::strlen(candidate) == length && std::strncmp(candidate, requested, length) == 0) {
+                return candidate;
+            }
+        }
+    }
+    return requested;
+}
+
+transcribe_status beginStream(NativeSession * ns, const char * language, int attContextRight) {
+    transcribe_capabilities caps;
+    transcribe_capabilities_init(&caps);
+    auto status = transcribe_model_get_capabilities(ns->model, &caps);
+    if (status != TRANSCRIBE_OK) return status;
+    if (!caps.supports_streaming || caps.native_sample_rate != 16000) return TRANSCRIBE_ERR_NOT_IMPLEMENTED;
+
+    transcribe_run_params run_params;
+    transcribe_run_params_init(&run_params);
+    run_params.language = modelLanguage(caps, language);
+    transcribe_stream_params stream_params;
+    transcribe_stream_params_init(&stream_params);
+
+    transcribe_parakeet_stream_ext parakeet;
+    transcribe_moonshine_streaming_stream_ext moonshine;
+    if (transcribe_model_accepts_ext_kind(ns->model, TRANSCRIBE_EXT_SLOT_STREAM,
+                                          TRANSCRIBE_EXT_KIND_PARAKEET_STREAM)) {
+        transcribe_parakeet_stream_ext_init(&parakeet);
+        parakeet.att_context_right = attContextRight;
+        stream_params.family = &parakeet.ext;
+    } else if (transcribe_model_accepts_ext_kind(ns->model, TRANSCRIBE_EXT_SLOT_STREAM,
+                                                 TRANSCRIBE_EXT_KIND_MOONSHINE_STREAMING_STREAM)) {
+        transcribe_moonshine_streaming_stream_ext_init(&moonshine);
+        // Match the microphone feed cadence; avoid extra autoregressive decodes
+        // within each half-second chunk on a CPU-only phone.
+        moonshine.min_decode_interval_ms = 500;
+        stream_params.family = &moonshine.ext;
+        // Moonshine can revise early punctuation/words. AUTO may then retain only
+        // a stale committed prefix at finalize, discarding the rest of the audio.
+        // Store one revisable live hypothesis until its final decode is available.
+        stream_params.commit_policy = TRANSCRIBE_STREAM_COMMIT_ON_FINALIZE;
+    } else {
+        return TRANSCRIBE_ERR_NOT_IMPLEMENTED;
+    }
+    return transcribe_stream_begin(ns->session, &run_params, &stream_params);
 }
 
 } // namespace
@@ -126,38 +239,27 @@ Java_com_sainadh_livenotes_stt_NemotronTranscriber_nativeInit(
         env->ReleaseStringUTFChars(jModelPath, modelPath);
         env->ReleaseStringUTFChars(jLanguage, language);
         delete ns;
-        throwNativeError(env, "Loading Nemotron model", st);
+        throwNativeError(env, "Loading speech model", st);
         return 0;
     }
 
     // 2. Open a session against the loaded model.
-    st = transcribe_session_init(ns->model, nullptr, &ns->session);
+    transcribe_session_params session_params;
+    transcribe_session_params_init(&session_params);
+    // Leave scheduling room for continuous microphone capture and the Android UI.
+    // A fixed upper budget also avoids large host/core counts oversubscribing CPU.
+    session_params.n_threads = 4;
+    st = transcribe_session_init(ns->model, &session_params, &ns->session);
     if (st != TRANSCRIBE_OK || ns->session == nullptr) {
         env->ReleaseStringUTFChars(jModelPath, modelPath);
         env->ReleaseStringUTFChars(jLanguage, language);
         delete ns;
-        throwNativeError(env, "Creating Nemotron session", st);
+        throwNativeError(env, "Creating speech session", st);
         return 0;
     }
 
-    // 3. Configure the run: language is mandatory for nemotron-3.5 (no
-    //    implicit default - see docs/models/nemotron-3.5-asr-streaming-0.6b.md).
-    struct transcribe_run_params run_params;
-    transcribe_run_params_init(&run_params);
-    run_params.language = language;
-
-    // 4. Configure streaming: att_context_right picks the cache-aware
-    //    latency/accuracy tradeoff. NULL family extension is fine too
-    //    (uses model default = highest accuracy / highest latency).
-    struct transcribe_parakeet_stream_ext stream_ext;
-    transcribe_parakeet_stream_ext_init(&stream_ext);
-    stream_ext.att_context_right = attContextRight; // -1 = model default
-
-    struct transcribe_stream_params stream_params;
-    transcribe_stream_params_init(&stream_params);
-    stream_params.family = &stream_ext.ext;
-
-    st = transcribe_stream_begin(ns->session, &run_params, &stream_params);
+    // Use only an extension that this loaded model explicitly accepts.
+    st = beginStream(ns, language, attContextRight);
 
     // language string was only needed for the duration of stream_begin
     // (the API copies it into session-owned storage - see the header's
@@ -167,12 +269,12 @@ Java_com_sainadh_livenotes_stt_NemotronTranscriber_nativeInit(
 
     if (st != TRANSCRIBE_OK) {
         delete ns;
-        throwNativeError(env, "Starting Nemotron stream", st);
+        throwNativeError(env, "Starting speech stream", st);
         return 0;
     }
 
     ns->stream_active = true;
-    LOGI("Nemotron stream initialized successfully");
+    LOGI("On-device speech stream initialized successfully");
     return reinterpret_cast<jlong>(ns);
 }
 
@@ -218,7 +320,7 @@ Java_com_sainadh_livenotes_stt_NemotronTranscriber_nativeFeedPcm(
     st = transcribe_stream_get_text(ns->session, &text);
     if (st != TRANSCRIBE_OK) {
         ns->stream_active = false;
-        throwNativeError(env, "Reading Nemotron transcript", st);
+        throwNativeError(env, "Reading speech transcript", st);
         return nullptr;
     }
 
@@ -227,7 +329,7 @@ Java_com_sainadh_livenotes_stt_NemotronTranscriber_nativeFeedPcm(
         combined += (text.committed_text ? text.committed_text : "");
         combined += '\x01';
         combined += (text.tentative_text ? text.tentative_text : "");
-        return env->NewStringUTF(combined.c_str());
+        return makeJString(env, combined.c_str());
     } catch (const std::bad_alloc &) {
         throwJavaError(env, "Unable to allocate transcript text", "java/lang/OutOfMemoryError");
         return nullptr;
@@ -255,12 +357,20 @@ Java_com_sainadh_livenotes_stt_NemotronTranscriber_nativeFinalizeStream(
     ns->stream_active = false;
 
     if (st != TRANSCRIBE_OK) {
-        throwNativeError(env, "Finalizing Nemotron transcript", st);
+        throwNativeError(env, "Finalizing speech transcript", st);
         return nullptr;
     }
 
-    const char * full = transcribe_full_text(ns->session);
-    return makeJString(env, full);
+    // Raw full_text may revise a prefix Moonshine already committed. The public
+    // stream snapshot preserves the append-only contract consumed by Kotlin.
+    transcribe_stream_text text;
+    transcribe_stream_text_init(&text);
+    st = transcribe_stream_get_text(ns->session, &text);
+    if (st != TRANSCRIBE_OK) {
+        throwNativeError(env, "Reading final speech transcript", st);
+        return nullptr;
+    }
+    return makeJString(env, text.committed_text);
 }
 
 /*
@@ -276,36 +386,33 @@ Java_com_sainadh_livenotes_stt_NemotronTranscriber_nativeRestartStream(
 
     auto * ns = reinterpret_cast<NativeSession *>(handle);
     if (ns == nullptr || ns->session == nullptr) {
-        throwJavaError(env, "Cannot restart: Nemotron session is unavailable");
+        throwJavaError(env, "Cannot restart: speech session is unavailable");
         return JNI_FALSE;
     }
 
     const char * language = env->GetStringUTFChars(jLanguage, nullptr);
     if (language == nullptr) return JNI_FALSE;
 
-    struct transcribe_run_params run_params;
-    transcribe_run_params_init(&run_params);
-    run_params.language = language;
-
-    struct transcribe_parakeet_stream_ext stream_ext;
-    transcribe_parakeet_stream_ext_init(&stream_ext);
-    stream_ext.att_context_right = attContextRight;
-
-    struct transcribe_stream_params stream_params;
-    transcribe_stream_params_init(&stream_params);
-    stream_params.family = &stream_ext.ext;
-
-    transcribe_status st = transcribe_stream_begin(ns->session, &run_params, &stream_params);
+    transcribe_status st = beginStream(ns, language, attContextRight);
     env->ReleaseStringUTFChars(jLanguage, language);
 
     if (st != TRANSCRIBE_OK) {
         ns->stream_active = false;
-        throwNativeError(env, "Restarting Nemotron stream", st);
+        throwNativeError(env, "Restarting speech stream", st);
         return JNI_FALSE;
     }
 
     ns->stream_active = true;
     return JNI_TRUE;
+}
+
+// Streaming status may be OK even when an autoregressive model reaches its
+// output window. Kotlin checks this after storing each returned snapshot.
+JNIEXPORT jboolean JNICALL
+Java_com_sainadh_livenotes_stt_NemotronTranscriber_nativeWasTruncated(
+        JNIEnv * /* env */, jobject /* thiz */, jlong handle) {
+    const auto * ns = reinterpret_cast<NativeSession *>(handle);
+    return ns != nullptr && transcribe_was_truncated(ns->session) ? JNI_TRUE : JNI_FALSE;
 }
 
 /*

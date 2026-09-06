@@ -13,8 +13,8 @@ import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
 
 /**
- * On-device streaming ASR using transcribe.cpp + NVIDIA's
- * nemotron-3.5-asr-streaming-0.6b (or nemotron-speech-streaming-en-0.6b),
+ * On-device streaming ASR using transcribe.cpp with NVIDIA Nemotron
+ * or Useful Sensors Moonshine Streaming GGUF models,
  * as a drop-in replacement for SpeechTranscriber's Android SpeechRecognizer
  * wrapper.
  *
@@ -90,6 +90,7 @@ class NemotronTranscriber(
     private external fun nativeFeedPcm(handle: Long, pcm: FloatArray): String
     private external fun nativeFinalizeStream(handle: Long): String
     private external fun nativeRestartStream(handle: Long, language: String, attContextRight: Int): Boolean
+    private external fun nativeWasTruncated(handle: Long): Boolean
     private external fun nativeDestroy(handle: Long)
 
     private val mainHandler = Handler(Looper.getMainLooper())
@@ -97,6 +98,8 @@ class NemotronTranscriber(
     private val stateLock = Any()
     private var state = State.IDLE
     private var generation = 0L
+    private var destructionFinished = false
+    private val destructionCallbacks = mutableListOf<() -> Unit>()
     private val worker = Executors.newSingleThreadExecutor { task ->
         Thread(task, "nemotron-worker")
     }
@@ -155,15 +158,35 @@ class NemotronTranscriber(
         }
     }
 
-    /** Suppresses callbacks immediately; the worker frees resources when safe. */
-    fun destroy() {
-        synchronized(stateLock) {
-            if (state == State.DESTROYED) return
-            state = State.DESTROYED
-            worker.execute { releaseHandle() }
-            worker.shutdown()
-            captureWorker.shutdown()
+    /**
+     * Suppresses listener callbacks immediately. Every completion runs once after
+     * microphone and native resources are released, including repeated destroys.
+     * Completion may run on the worker or, if already released, the caller thread.
+     */
+    fun destroy(onDestroyed: () -> Unit = {}) {
+        val alreadyFinished = synchronized(stateLock) {
+            if (destructionFinished) {
+                true
+            } else {
+                destructionCallbacks += onDestroyed
+                if (state != State.DESTROYED) {
+                    state = State.DESTROYED
+                    worker.execute {
+                        releaseHandle()
+                        val completions = synchronized(stateLock) {
+                            destructionFinished = true
+                            destructionCallbacks.toList().also { destructionCallbacks.clear() }
+                        }
+                        // One caller's cleanup must not prevent another completion.
+                        completions.forEach { completion -> runCatching(completion) }
+                    }
+                    worker.shutdown()
+                    captureWorker.shutdown()
+                }
+                false
+            }
         }
+        if (alreadyFinished) runCatching(onDestroyed)
     }
 
     private fun wantsCapture(session: Long): Boolean = synchronized(stateLock) {
@@ -198,11 +221,11 @@ class NemotronTranscriber(
                 check(File(modelPath).exists()) { "Model file not found at $modelPath" }
                 postActive(session) { listener.onStateChanged("loading model") }
                 handle = nativeInit(modelPath, language, attContextRight)
-                check(handle != 0L) { "Failed to load Nemotron model / open stream" }
+                check(handle != 0L) { "Failed to load speech model / open stream" }
             } else {
                 postActive(session) { listener.onStateChanged("restarting") }
                 check(nativeRestartStream(handle, language, attContextRight)) {
-                    "Failed to restart Nemotron stream"
+                    "Failed to restart speech stream"
                 }
             }
             streamOpened = true
@@ -217,6 +240,7 @@ class NemotronTranscriber(
                 val pcm = capture.chunks.poll(20, TimeUnit.MILLISECONDS) ?: continue
                 val result = nativeFeedPcm(handle, pcm)
                 segments.update(result).forEach { update -> postTranscript(session, update) }
+                checkOutputLimit()
             }
         } catch (error: Throwable) {
             failure = describeFailure(error)
@@ -231,6 +255,7 @@ class NemotronTranscriber(
                 try {
                     // Capture errors still preserve all audio accepted before the error.
                     finalUpdate = segments.finish(nativeFinalizeStream(handle))
+                    checkOutputLimit()
                 } catch (error: Throwable) {
                     failure = describeFailure(error)
                 }
@@ -342,6 +367,12 @@ class NemotronTranscriber(
             }
             postSession(session) { listener.onStateChanged("finishing") }
             capture.finished.countDown()
+        }
+    }
+
+    private fun checkOutputLimit() {
+        check(!nativeWasTruncated(handle)) {
+            "Speech model reached its output limit. Recording stopped; start a new recording to continue."
         }
     }
 

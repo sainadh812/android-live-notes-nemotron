@@ -11,7 +11,7 @@ internal class NativeTranscriptSegments {
         val parts = snapshot.split('\u0001', limit = 2)
         val nextCommitted = parts[0]
         check(nextCommitted.startsWith(committed)) {
-            "Nemotron changed already committed text; recording stopped to preserve the saved transcript"
+            "Speech engine changed already committed text; recording stopped to preserve the saved transcript"
         }
         // A committed prefix may end inside a word. Keep that last word editable
         // until a separator arrives, preserving all spaces and punctuation exactly.
@@ -35,7 +35,7 @@ internal class NativeTranscriptSegments {
 
     fun finish(fullText: String): TranscriptUpdate {
         check(fullText.startsWith(committed)) {
-            "Nemotron changed already committed text while finishing; the unfinished text was preserved"
+            "Speech engine changed already committed text while finishing; the unfinished text was preserved"
         }
         return TranscriptUpdate(segmentId, fullText.substring(emittedChars), TranscriptStatus.FINAL,
             appendToPrevious = true)

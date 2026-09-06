@@ -2,13 +2,17 @@
 
 Android app in Kotlin for live speech transcription, daily notes, and AI summaries with action items. Supports Android 8+ on arm64 devices.
 
-- Nemotron 3.5 performs on-device transcription after a GGUF model is downloaded in Settings. The bundled engine runs on the CPU.
-- Before a model is available, the app uses Android SpeechRecognizer. That provider may use network recognition; availability depends on the device.
+[Download Preview 1.0.3 APK](https://github.com/sainadh812/android-live-notes-nemotron/releases/download/v1.0.3-models-and-ui/android-live-notes-nemotron-v1.0.3-preview.apk) · [Model comparison and validation](SPEECH_MODELS.md)
+
+- Choose Moonshine Tiny Streaming for English short notes, Nemotron English for longer English sessions, or Nemotron 3.5 for 32 supported language locales. All downloaded models run on the CPU on your phone. See [model choices and evidence](SPEECH_MODELS.md).
+- Android speech is an explicit alternative and the initial choice on a new installation. Its provider may use network recognition; availability depends on the device. Downloads do not change your selected engine.
 - A foreground service supports phone and Bluetooth microphones, including capture with the screen off.
 - Room stores transcript chunks and daily notes locally. OpenAI, DeepSeek, or Qwen can summarize text using the user's API key.
 - Partial transcripts schedule a summary at most once per 30-second interval. Final results request a prompt refresh; updates arriving during a request are coalesced. Failed summaries expose a Retry summary action.
 - Microphone capture runs independently of native inference, with a bounded 10-second queue. Stop drains accepted audio before finalizing. Overload stops capture with a visible error.
 - New recordings store stable transcript segments and update one tentative segment. Interrupted Android recognizer results are preserved with an explicit uncertain status before retries. Existing notes survive the database upgrade.
+
+- Record, Notes, and Settings tabs keep capture controls separate from downloads and AI setup. Model files use immutable URLs and SHA-256 verification, with validated partial-download recovery.
 
 ## Build and test
 
@@ -18,7 +22,7 @@ Install JDK 17 and the Android SDK with platform 35, build tools 34.0.0, and NDK
 ./gradlew :app:testDebugUnitTest :app:lintDebug :app:assembleDebug
 ```
 
-The debug APK is `app/build/outputs/apk/debug/app-debug.apk`. The current app version is 1.0.2 (version code 3). Windows users can invoke the same tasks with `gradlew.bat`.
+The debug APK is `app/build/outputs/apk/debug/app-debug.apk`. The current app version is 1.0.3 (version code 4). Windows users can invoke the same tasks with `gradlew.bat`.
 
 For a phone trial alongside an older installation, build with `-PpreviewBuild=true`:
 
@@ -26,7 +30,7 @@ For a phone trial alongside an older installation, build with `-PpreviewBuild=tr
 ./gradlew :app:assembleDebug -PpreviewBuild=true
 ```
 
-This produces **LiveMeetingNotes Preview** with package `com.sainadh.livenotes.preview`, separate notes/settings/models, and version 1.0.2-preview. The published 1.0.2 Preview uses the same signing key as 1.0.1 Preview and installs over it, preserving its notes and models. The original non-Preview app remains a separate installation.
+This produces **LiveMeetingNotes Preview** with package `com.sainadh.livenotes.preview`, separate notes/settings/models, and version 1.0.3-preview. The published 1.0.3 Preview uses the same signing key as 1.0.1 and 1.0.2 Preview and installs over it, preserving its notes and models. The original non-Preview app remains a separate installation.
 
 Network-specific Gradle proxy settings belong in your personal `~/.gradle/gradle.properties`; the repository does not force a corporate proxy.
 
@@ -52,9 +56,10 @@ The native and Kotlin host checks use controlled test doubles and validate the a
 
 1. Install the debug APK on an arm64 Android device and grant microphone access. Notification and Bluetooth permissions are optional for phone-microphone capture.
 2. Start listening to check the OS recognizer. No AI key is needed for the live transcript.
-3. In Settings, download a Nemotron model. Stop and restart listening to switch to it. With multiple downloaded models, the app currently prefers Q8_0.
+3. In Settings, download a speech model, then tap **Use this model**. Start a new recording to apply your choice. Moonshine Tiny is a small English model to try first. Multilingual Nemotron provides a language selector, including auto-detect.
 4. Select an AI provider, save your own API key, and test the connection for summaries. Transcription errors and summary errors are shown separately.
-5. Stop listening when finished. Shutdown preserves the final transcript before closing the service. A slow native call may take time to finish, but it cannot be freed while in use.
+5. Stop recording when finished. The UI distinguishes preparing, recording, and saving. Shutdown preserves the final transcript before closing the service. A slow native call may take time to finish.
+6. Open **Notes** to reopen and copy saved transcripts, even without an AI key. Unconfirmed words are labeled; summaries and action items appear separately. Raw audio is not stored.
 
 ## Validation limits
 

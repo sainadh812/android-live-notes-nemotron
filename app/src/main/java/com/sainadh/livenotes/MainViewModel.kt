@@ -15,7 +15,9 @@ import com.sainadh.livenotes.service.ForegroundListeningService
 import com.sainadh.livenotes.service.ServiceStateTracker
 import com.sainadh.livenotes.stt.ModelDownloadManager
 import com.sainadh.livenotes.stt.ModelDownloadState
-import com.sainadh.livenotes.stt.NemotronQuant
+import com.sainadh.livenotes.stt.SpeechModel
+import com.sainadh.livenotes.stt.SpeechLanguage
+import com.sainadh.livenotes.service.CapturePhase
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -41,6 +43,12 @@ class MainViewModel(
         initialValue = null
     )
 
+    val savedRecordings = repository.observeSavedRecordings().stateIn(
+        scope = viewModelScope,
+        started = SharingStarted.WhileSubscribed(5_000),
+        initialValue = emptyList()
+    )
+
     val allNotes: StateFlow<List<DailyNote>> = repository.observeAll().stateIn(
         scope = viewModelScope,
         started = SharingStarted.WhileSubscribed(5_000),
@@ -64,6 +72,19 @@ class MainViewModel(
         started = SharingStarted.WhileSubscribed(5_000),
         initialValue = ModelDownloadState.Idle
     )
+
+    private val speechSettingsStore = (application as LiveNotesApplication).appContainer.speechSettings
+    val speechSettings = speechSettingsStore.state
+    val downloadedModels = modelDownloadManager.downloadedModels
+    val modelDownloadTarget = modelDownloadManager.downloadTarget
+
+    fun selectSpeechModel(model: SpeechModel?) {
+        if (model == null || modelDownloadManager.isDownloaded(model)) speechSettingsStore.selectModel(model)
+    }
+
+    fun selectSpeechLanguage(language: SpeechLanguage) = speechSettingsStore.selectLanguage(language)
+
+    fun saveAudioInputMode(mode: AudioInputMode) = apiKeyStore.saveAudioInputMode(mode)
 
     fun saveSettings(
         provider: LlmProvider,
@@ -142,24 +163,17 @@ class MainViewModel(
         app.appContainer.conversationOrchestrator.retrySummary()
     }
 
-    /** Which quant (if any) is already fully downloaded on this device. */
-    fun downloadedQuant(): NemotronQuant? = modelDownloadManager.findAnyDownloaded()
-
-    /**
-     * Starts (or resumes) downloading the given quant's GGUF model file.
-     * Safe to call again after a Failed state to retry/resume. Listening
-     * must be restarted (stop then start) after a download completes for
-     * ForegroundListeningService to pick up the newly-available model,
-     * since the transcriber is selected at the start of each session.
-     */
-    fun downloadModel(quant: NemotronQuant) {
-        viewModelScope.launch(Dispatchers.IO) {
-            modelDownloadManager.download(quant)
-        }
+    fun downloadModel(model: SpeechModel) {
+        viewModelScope.launch(Dispatchers.IO) { modelDownloadManager.download(model) }
     }
 
-    fun deleteModel(quant: NemotronQuant) {
-        modelDownloadManager.delete(quant)
+    fun deleteModel(model: SpeechModel) {
+        if (ServiceStateTracker.capturePhase.value != CapturePhase.IDLE) return
+        viewModelScope.launch {
+            kotlinx.coroutines.withContext(Dispatchers.IO) { modelDownloadManager.delete(model) }
+            // Keep the explicit selection even when its file was removed. A new
+            // recording will ask for a download instead of switching providers.
+        }
     }
 
     class Factory(private val application: LiveNotesApplication) : ViewModelProvider.Factory {

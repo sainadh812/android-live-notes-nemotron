@@ -4,9 +4,9 @@ class NemotronTranscriber(context: Context, modelPath: String, language: String,
     var stopRequested = false
     var destroyed = false
     init { last = this }
-    fun start() { listener.onStateChanged("listening") }
+    fun start() { listener.onStateChanged("loading model") }
     fun stop() { stopRequested = true }
-    fun destroy() { destroyed = true }
+    fun destroy(onDestroyed: () -> Unit = {}) { destroyed = true; onDestroyed() }
     companion object {
         lateinit var last: NemotronTranscriber
         fun isAvailable() = true

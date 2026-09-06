@@ -17,6 +17,7 @@ import com.sainadh.livenotes.MainActivity
 import com.sainadh.livenotes.R
 import com.sainadh.livenotes.audio.BluetoothAudioRouter
 import com.sainadh.livenotes.stt.NemotronTranscriber
+import com.sainadh.livenotes.stt.SpeechModel
 import com.sainadh.livenotes.stt.SpeechTranscriber
 import com.sainadh.livenotes.stt.TranscriptStatus
 import com.sainadh.livenotes.stt.TranscriptUpdate
@@ -31,7 +32,11 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
+enum class CapturePhase { IDLE, PREPARING, RECORDING, FINISHING }
+
 object ServiceStateTracker {
+    val capturePhase = MutableStateFlow(CapturePhase.IDLE)
+    val activeEngine = MutableStateFlow("Android speech")
     val listening = MutableStateFlow(false)
     val latestTranscript = MutableStateFlow("")
     val audioRoute = MutableStateFlow("Not listening")
@@ -53,6 +58,7 @@ class ForegroundListeningService : Service() {
     private var speechTranscriber: SpeechTranscriber? = null
     private var nemotronTranscriber: NemotronTranscriber? = null
     private var usingNemotron = false
+    private var leasedModel: SpeechModel? = null
     private var wakeLock: PowerManager.WakeLock? = null
     private var bluetoothAudioRouter: BluetoothAudioRouter? = null
 
@@ -76,20 +82,28 @@ class ForegroundListeningService : Service() {
     private fun resolveTranscriber(listener: SpeechTranscriber.Listener) {
         val app = application as LiveNotesApplication
         val downloadManager = app.appContainer.modelDownloadManager
-        val availableQuant = downloadManager.findAnyDownloaded()
-        usingNemotron = availableQuant != null && NemotronTranscriber.isAvailable()
-        if (usingNemotron && availableQuant != null) {
+        val settings = app.appContainer.speechSettings.state.value
+        val model = settings.model
+        usingNemotron = model != null
+        ServiceStateTracker.activeEngine.value = model?.title ?: "Android speech"
+        if (model != null) {
+            check(downloadManager.isDownloaded(model)) {
+                "${model.title} is missing or incomplete. Download it in Settings, or select Android speech."
+            }
+            check(NemotronTranscriber.isAvailable()) {
+                "On-device speech could not load (${NemotronTranscriber.loadError()}). Select Android speech in Settings to use your phone’s recognizer."
+            }
+            check(downloadManager.acquireForCapture(model)) {
+                "${model.title} is unavailable. Download it in Settings, then try again."
+            }
+            leasedModel = model
             nemotronTranscriber = NemotronTranscriber(
                 context = this,
-                modelPath = downloadManager.modelFile(availableQuant).absolutePath,
-                language = "en-US",
+                modelPath = downloadManager.modelFile(model).absolutePath,
+                language = settings.language.code,
                 listener = listener
             )
         } else {
-            if (availableQuant != null && !NemotronTranscriber.isAvailable()) {
-                ServiceStateTracker.lastTranscriptionError.value =
-                    "On-device libraries could not load (${NemotronTranscriber.loadError()}). Using the OS speech recognizer."
-            }
             speechTranscriber = SpeechTranscriber(this, listener)
         }
     }
@@ -104,6 +118,7 @@ class ForegroundListeningService : Service() {
             Phase.IDLE -> Unit
         }
         phase = Phase.LISTENING
+        ServiceStateTracker.capturePhase.value = CapturePhase.PREPARING
         val sessionGeneration = ++generation
         ServiceStateTracker.lastTranscriptionError.value = null
         ServiceStateTracker.latestTranscript.value = ""
@@ -121,7 +136,7 @@ class ForegroundListeningService : Service() {
             ServiceStateTracker.listening.value = true
             acquireWakeLock()
             updateNotification(
-                "Using $route" + if (usingNemotron) " (on-device Nemotron)" else " (OS speech recognizer)"
+                "Preparing ${ServiceStateTracker.activeEngine.value} · $route"
             )
             if (usingNemotron) nemotronTranscriber?.start() else speechTranscriber?.start()
         } catch (error: RuntimeException) {
@@ -187,10 +202,16 @@ class ForegroundListeningService : Service() {
                 finishCapture(sessionGeneration)
             } else if (state == "finishing") {
                 phase = Phase.STOPPING
+                ServiceStateTracker.capturePhase.value = CapturePhase.FINISHING
                 ServiceStateTracker.listening.value = false
                 updateNotification("Finishing transcription")
             } else if (phase == Phase.LISTENING) {
-                if (state == "ready") ServiceStateTracker.lastTranscriptionError.value = null
+                if (state == "ready" || state == "listening") {
+                    ServiceStateTracker.capturePhase.value = CapturePhase.RECORDING
+                    ServiceStateTracker.lastTranscriptionError.value = null
+                } else if (state == "loading model" || state == "restarting") {
+                    ServiceStateTracker.capturePhase.value = CapturePhase.PREPARING
+                }
                 updateNotification(state)
             }
         }
@@ -212,6 +233,7 @@ class ForegroundListeningService : Service() {
             }
             Phase.LISTENING -> {
                 phase = Phase.STOPPING
+                ServiceStateTracker.capturePhase.value = CapturePhase.FINISHING
                 updateNotification("Finishing transcription")
                 // Both transcribers emit their final result before a stopped callback.
                 // Do not destroy them or cancel pending writes until that arrives.
@@ -224,6 +246,7 @@ class ForegroundListeningService : Service() {
     private fun finishCapture(sessionGeneration: Int) {
         if (generation != sessionGeneration || phase == Phase.DRAINING || phase == Phase.DESTROYED) return
         phase = Phase.DRAINING
+        ServiceStateTracker.capturePhase.value = CapturePhase.FINISHING
         ServiceStateTracker.listening.value = false
         releaseAudioResources()
         updateNotification("Saving transcript")
@@ -235,6 +258,7 @@ class ForegroundListeningService : Service() {
             destroyTranscribers()
             lastTranscriptJob = null
             phase = Phase.IDLE
+            ServiceStateTracker.capturePhase.value = CapturePhase.IDLE
             if (restartRequested) {
                 restartRequested = false
                 startListening()
@@ -255,14 +279,25 @@ class ForegroundListeningService : Service() {
     }
 
     private fun destroyTranscribers() {
-        nemotronTranscriber?.destroy()
+        val native = nemotronTranscriber
+        val model = leasedModel
+        val manager = (application as LiveNotesApplication).appContainer.modelDownloadManager
         nemotronTranscriber = null
+        leasedModel = null
+        if (native != null) {
+            // Model loading and JNI shutdown are asynchronous. Keep its file
+            // leased until the worker has actually released the native handle.
+            native.destroy { if (model != null) manager.releaseFromCapture(model) }
+        } else if (model != null) {
+            manager.releaseFromCapture(model)
+        }
         speechTranscriber?.destroy()
         speechTranscriber = null
     }
 
     override fun onDestroy() {
         phase = Phase.DESTROYED
+        ServiceStateTracker.capturePhase.value = CapturePhase.IDLE
         generation += 1
         destroyTranscribers()
         releaseAudioResources()

@@ -15,6 +15,8 @@ import org.junit.Test
 
 class TranscriptStorageTest {
     private class MemoryDao : TranscriptSegmentDao {
+        override fun observeAll(): kotlinx.coroutines.flow.Flow<List<TranscriptSegmentEntity>> =
+            kotlinx.coroutines.flow.flowOf(emptyList())
         val rows = mutableMapOf<Pair<String, Long>, TranscriptSegmentEntity>()
         override suspend fun get(recordingId: String, segmentId: Long) = rows[recordingId to segmentId]
         override suspend fun insert(segment: TranscriptSegmentEntity) {

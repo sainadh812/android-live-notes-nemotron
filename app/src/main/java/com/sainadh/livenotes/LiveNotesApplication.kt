@@ -7,6 +7,7 @@ import com.sainadh.livenotes.data.ApiKeyStore
 import com.sainadh.livenotes.data.NotesDatabase
 import com.sainadh.livenotes.data.NotesRepository
 import com.sainadh.livenotes.stt.ModelDownloadManager
+import com.sainadh.livenotes.stt.SpeechSettingsStore
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -39,4 +40,5 @@ class AppContainer(application: Application) {
     val repository: NotesRepository = notesRepository
     val secureSettings: ApiKeyStore = apiKeyStore
     val modelDownloadManager = ModelDownloadManager(application)
+    val speechSettings = SpeechSettingsStore(application, modelDownloadManager.findAnyDownloaded())
 }

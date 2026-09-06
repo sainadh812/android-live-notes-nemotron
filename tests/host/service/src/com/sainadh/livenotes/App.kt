@@ -5,6 +5,7 @@ import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 import com.sainadh.livenotes.stt.TranscriptStatus
 import com.sainadh.livenotes.stt.TranscriptUpdate
+import com.sainadh.livenotes.stt.SpeechModel as TestModel
 class MainActivity
 object R {
     object string {
@@ -20,12 +21,21 @@ class LiveNotesApplication : Application() {
 class AppContainer {
     val modelDownloadManager = DownloadManager()
     val secureSettings = Settings()
+    val speechSettings = SpeechSettingsStore(modelDownloadManager)
     val conversationOrchestrator = Orchestrator()
 }
 class DownloadManager {
     var useNative = false
-    fun findAnyDownloaded(): Int? = if (useNative) 1 else null
-    fun modelFile(quant: Int) = File("test.gguf")
+    var leased = false
+    fun acquireForCapture(model: TestModel): Boolean { leased = useNative; return leased }
+    fun releaseFromCapture(model: TestModel) { leased = false }
+    fun isDownloaded(model: TestModel) = useNative
+    fun modelFile(model: TestModel) = File("test.gguf")
+}
+data class TestLanguage(val code: String = "en-US")
+data class TestSpeechSettings(val model: TestModel?, val language: TestLanguage = TestLanguage())
+class SpeechSettingsStore(private val manager: DownloadManager) {
+    val state get() = kotlinx.coroutines.flow.MutableStateFlow(TestSpeechSettings(if (manager.useNative) TestModel() else null))
 }
 class Settings { fun readAudioInputMode() = "phone" }
 class Orchestrator {

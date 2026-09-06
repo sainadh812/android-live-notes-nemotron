@@ -4,7 +4,8 @@ import java.util.concurrent.atomic.AtomicInteger;
 public class Gate {
     public static final CountDownLatch entered = new CountDownLatch(1), release = new CountDownLatch(1);
     public static final CountDownLatch readEntered = new CountDownLatch(1), readRelease = new CountDownLatch(1);
-    public static volatile boolean blockEmptyRead = false;
+    public static volatile boolean blockEmptyRead = false, truncated = false;
+    public static volatile String truncateOperation = "";
     public static final AtomicInteger feedFrames = new AtomicInteger();
     public static final java.util.List<Integer> feedSizes = new java.util.concurrent.CopyOnWriteArrayList<>();
     public static final AtomicInteger inits = new AtomicInteger(), feeds = new AtomicInteger(),
@@ -20,6 +21,7 @@ public class Gate {
                 entered.countDown();
                 release.await();
             }
+            if (truncateOperation.equals(name)) truncated = true;
             if (failOperation.equals(name)) throw new IllegalStateException("native " + name + " failed: test status");
         } catch (InterruptedException error) {
             throw new AssertionError(error);

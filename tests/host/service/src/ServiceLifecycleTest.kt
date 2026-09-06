@@ -5,6 +5,7 @@ import android.os.PowerManager
 import android.speech.SpeechRecognizer
 import com.sainadh.livenotes.LiveNotesApplication
 import com.sainadh.livenotes.audio.BluetoothAudioRouter
+import com.sainadh.livenotes.service.CapturePhase
 import com.sainadh.livenotes.service.ForegroundListeningService
 import com.sainadh.livenotes.service.ServiceStateTracker
 import com.sainadh.livenotes.stt.NemotronTranscriber
@@ -40,10 +41,27 @@ fun main() {
         run(service)
         service.onDestroy()
         check(!NotificationManager.active)
+        check(!LiveNotesApplication.instance.appContainer.modelDownloadManager.leased)
+        check(ServiceStateTracker.capturePhase.value == CapturePhase.IDLE)
         check(PowerManager.locks.none { it.isHeld })
         check(!BluetoothAudioRouter.active)
         passed += 1
         println("PASS $name")
+    }
+    scenario("UI waits for the microphone and finishes only after saving") { service ->
+        check(ServiceStateTracker.capturePhase.value == CapturePhase.PREPARING)
+        check(ServiceStateTracker.activeEngine.value == "Test native model")
+        check(LiveNotesApplication.instance.appContainer.modelDownloadManager.leased)
+        val transcriber = NemotronTranscriber.last
+        transcriber.listener.onStateChanged("loading model")
+        check(ServiceStateTracker.capturePhase.value == CapturePhase.PREPARING)
+        transcriber.listener.onStateChanged("listening")
+        check(ServiceStateTracker.capturePhase.value == CapturePhase.RECORDING)
+        service.onStartCommand(Intent(ForegroundListeningService.ACTION_STOP), 0, 2)
+        check(ServiceStateTracker.capturePhase.value == CapturePhase.FINISHING)
+        transcriber.listener.onStateChanged("stopped")
+        drainUntil { service.stopped }
+        check(ServiceStateTracker.capturePhase.value == CapturePhase.IDLE)
     }
     scenario("stop preserves final write before service destruction") { service ->
         val transcriber = NemotronTranscriber.last

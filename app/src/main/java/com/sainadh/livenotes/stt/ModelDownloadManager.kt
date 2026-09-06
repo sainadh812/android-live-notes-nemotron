@@ -7,191 +7,335 @@ import kotlinx.coroutines.flow.asStateFlow
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import java.io.File
+import java.io.FileOutputStream
 import java.io.IOException
+import java.security.MessageDigest
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.locks.ReentrantLock
 
-/**
- * Downloads a Nemotron 3.5 streaming ASR GGUF model file to app-private
- * storage (filesDir/models/), with progress reporting and resume-on-retry
- * support (HTTP Range requests against a partial .part file).
- *
- * ForegroundListeningService checks for the final (non-.part) file's
- * existence to decide whether to use NemotronTranscriber or fall back to
- * SpeechTranscriber - this class writes to a .part file and renames it to
- * the final name only on full success, so a failed/interrupted download
- * never looks like a complete model to that check.
- */
 sealed class ModelDownloadState {
     object Idle : ModelDownloadState()
     object CheckingExisting : ModelDownloadState()
     data class Downloading(val bytesDownloaded: Long, val totalBytes: Long) : ModelDownloadState() {
-        val progress: Float get() = if (totalBytes > 0) bytesDownloaded.toFloat() / totalBytes else 0f
+        val progress: Float get() = if (totalBytes > 0) {
+            (bytesDownloaded.toFloat() / totalBytes).coerceIn(0f, 1f)
+        } else 0f
     }
     data class Failed(val message: String) : ModelDownloadState()
     object Completed : ModelDownloadState()
 }
 
-class ModelDownloadManager(
-    private val context: Context,
-    private val client: OkHttpClient = OkHttpClient.Builder()
-        .connectTimeout(30, TimeUnit.SECONDS)
-        .readTimeout(60, TimeUnit.SECONDS)
-        .build()
+/** Downloads pinned model bytes, publishing the final file only after full verification. */
+class ModelDownloadManager internal constructor(
+    private val modelsDir: File,
+    private val client: OkHttpClient
 ) {
+    constructor(
+        context: Context,
+        client: OkHttpClient = OkHttpClient.Builder()
+            .connectTimeout(30, TimeUnit.SECONDS)
+            .readTimeout(60, TimeUnit.SECONDS)
+            .build()
+    ) : this(File(context.applicationContext.filesDir, "models"), client)
+
+    private val operationLock = ReentrantLock()
+    // Short file/lease transitions only. Never hold this during hashing or network I/O.
+    private val captureGuard = Any()
+    private val captureUsers = mutableMapOf<SpeechModel, Int>()
     private val _state = MutableStateFlow<ModelDownloadState>(ModelDownloadState.Idle)
     val state: StateFlow<ModelDownloadState> = _state.asStateFlow()
+    private val _downloadTarget = MutableStateFlow<SpeechModel?>(null)
+    val downloadTarget: StateFlow<SpeechModel?> = _downloadTarget.asStateFlow()
+    private val _downloadedModels = MutableStateFlow(scanDownloadedModels())
+    val downloadedModels: StateFlow<Set<SpeechModel>> = _downloadedModels.asStateFlow()
 
-    private val modelsDir: File get() = File(context.filesDir, "models")
+    fun modelFile(model: SpeechModel): File = File(modelsDir, model.fileName)
 
-    fun modelFile(quant: NemotronQuant): File = File(modelsDir, quant.fileName)
+    private fun partFile(model: SpeechModel): File = File(modelsDir, "${model.fileName}.part")
 
-    private fun partFile(quant: NemotronQuant): File = File(modelsDir, "${quant.fileName}.part")
-
-    /** True if a fully-downloaded model file for this quant already exists. */
-    fun isDownloaded(quant: NemotronQuant): Boolean = modelFile(quant).exists()
-
-    /** Any quant already downloaded, preferring the caller's requested one. Null if none. */
-    fun findAnyDownloaded(preferred: NemotronQuant = NemotronQuant.default): NemotronQuant? {
-        if (isDownloaded(preferred)) return preferred
-        return NemotronQuant.entries.firstOrNull { isDownloaded(it) }
+    /** Pins an installed file against removal/repair until its capture owner releases it. */
+    fun acquireForCapture(model: SpeechModel): Boolean = synchronized(captureGuard) {
+        if (!isDownloaded(model)) return@synchronized false
+        captureUsers[model] = (captureUsers[model] ?: 0) + 1
+        true
     }
 
-    /**
-     * Downloads the given quant. Safe to call from a coroutine on
-     * Dispatchers.IO. Resumes a previous partial download via HTTP Range
-     * when a .part file already exists from an interrupted attempt.
-     * Updates [state] throughout; caller observes it for UI progress.
-     */
-    fun download(quant: NemotronQuant) {
-        _state.value = ModelDownloadState.CheckingExisting
+    fun releaseFromCapture(model: SpeechModel) = synchronized(captureGuard) {
+        val remaining = (captureUsers[model] ?: 0) - 1
+        if (remaining > 0) captureUsers[model] = remaining else captureUsers.remove(model)
+        Unit
+    }
 
-        if (isDownloaded(quant)) {
-            _state.value = ModelDownloadState.Completed
-            return
+    private fun requireUnused(model: SpeechModel) {
+        if ((captureUsers[model] ?: 0) > 0) {
+            throw IOException("Stop recording before changing ${model.title}.")
+        }
+    }
+
+    /** Cheap startup check; download() also hashes legacy files before reporting Completed. */
+    fun isDownloaded(model: SpeechModel): Boolean = try {
+        val file = modelFile(model)
+        file.isFile && file.length() == model.expectedBytes && looksLikeGguf(file)
+    } catch (_: SecurityException) {
+        false
+    }
+
+    fun findAnyDownloaded(preferred: SpeechModel = SpeechModel.NEMOTRON_Q8): SpeechModel? =
+        preferred.takeIf(::isDownloaded) ?: (listOf(
+            SpeechModel.NEMOTRON_Q8, SpeechModel.NEMOTRON_Q6,
+            SpeechModel.NEMOTRON_Q5, SpeechModel.NEMOTRON_Q4
+        ) + SpeechModel.entries).firstOrNull(::isDownloaded)
+
+    private fun scanDownloadedModels(): Set<SpeechModel> =
+        SpeechModel.entries.filterTo(linkedSetOf(), ::isDownloaded)
+
+    private fun refreshDownloadedModels() = synchronized(captureGuard) {
+        _downloadedModels.value = scanDownloadedModels()
+    }
+
+    private fun checkModelUnused(model: SpeechModel) = synchronized(captureGuard) {
+        requireUnused(model)
+    }
+
+    private fun removeCorruptModel(model: SpeechModel, target: File) = synchronized(captureGuard) {
+        // A recording can acquire the old file while the hash is being checked.
+        requireUnused(model)
+        deleteChecked(target)
+        refreshDownloadedModels()
+    }
+
+    private fun publishVerifiedModel(model: SpeechModel, partial: File, target: File) =
+        synchronized(captureGuard) {
+            requireUnused(model)
+            if (!partial.renameTo(target)) throw IOException("Could not finalize the verified model file")
+            refreshDownloadedModels()
         }
 
-        modelsDir.mkdirs()
-        val partFile = partFile(quant)
-        val finalFile = modelFile(quant)
-        val resumeFrom = if (partFile.exists()) partFile.length() else 0L
-
+    /** Blocking I/O: call on an I/O worker. Concurrent download requests are ignored. */
+    fun download(model: SpeechModel) {
+        if (!operationLock.tryLock()) return
         try {
-            val requestBuilder = Request.Builder().url(quant.downloadUrl)
-            if (resumeFrom > 0) {
-                requestBuilder.addHeader("Range", "bytes=$resumeFrom-")
+            _downloadTarget.value = model
+            _state.value = ModelDownloadState.CheckingExisting
+            checkModelUnused(model)
+            check(model.expectedBytes >= 4 && model.sha256.matches(Regex("[a-fA-F0-9]{64}"))) {
+                "Model download metadata is invalid"
+            }
+            if (!modelsDir.isDirectory && !modelsDir.mkdirs()) {
+                throw IOException("Could not create model storage directory")
             }
 
-            client.newCall(requestBuilder.build()).execute().use { response ->
-                if (!response.isSuccessful && response.code != 206) {
-                    // A 416 (Range Not Satisfiable) means our .part is already
-                    // complete or corrupt-oversized - restart clean.
-                    if (response.code == 416) {
-                        partFile.delete()
-                        return download(quant)
+            val target = modelFile(model)
+            val partial = partFile(model)
+            if (target.exists()) {
+                try {
+                    verifyModelFile(target, model.expectedBytes, model.sha256)
+                    refreshDownloadedModels()
+                    _state.value = ModelDownloadState.Completed
+                    return
+                } catch (_: CorruptModelException) {
+                    removeCorruptModel(model, target)
+                }
+            }
+            if (partial.exists() && (partial.length() > model.expectedBytes ||
+                    (partial.length() >= 4 && !looksLikeGguf(partial)))) {
+                deleteChecked(partial)
+            }
+
+            // An interrupted process can leave every byte on disk before the rename.
+            if (partial.length() != model.expectedBytes) downloadBytes(model, partial)
+            _state.value = ModelDownloadState.CheckingExisting
+            try {
+                verifyModelFile(partial, model.expectedBytes, model.sha256)
+            } catch (error: CorruptModelException) {
+                deleteChecked(partial)
+                throw IOException("${error.message}. Corrupt download removed; please retry.", error)
+            }
+            publishVerifiedModel(model, partial, target)
+            _state.value = ModelDownloadState.Completed
+        } catch (error: IOException) {
+            _state.value = ModelDownloadState.Failed(error.message ?: "Download failed; retry to resume")
+        } catch (error: SecurityException) {
+            _state.value = ModelDownloadState.Failed("Cannot access model storage: ${error.message.orEmpty()}")
+        } catch (error: IllegalArgumentException) {
+            _state.value = ModelDownloadState.Failed("Invalid model download: ${error.message.orEmpty()}")
+        } catch (error: IllegalStateException) {
+            _state.value = ModelDownloadState.Failed(error.message ?: "Could not download model")
+        } finally {
+            operationLock.unlock()
+        }
+    }
+
+    private fun downloadBytes(model: SpeechModel, partial: File) {
+        var retriedUnsatisfiedRange = false
+        while (true) {
+            val resumeFrom = partial.length()
+            val request = Request.Builder().url(model.downloadUrl)
+                // Byte offsets must address the exact, uncompressed representation.
+                .header("Accept-Encoding", "identity")
+                .apply { if (resumeFrom > 0) header("Range", "bytes=$resumeFrom-") }
+                .build()
+            val retryClean = client.newCall(request).execute().use { response ->
+                if (response.code == 416) {
+                    if (resumeFrom == 0L || retriedUnsatisfiedRange) {
+                        throw IOException("Server rejected the model download range (HTTP 416)")
                     }
-                    _state.value = ModelDownloadState.Failed("Download failed: HTTP ${response.code}")
-                    return
+                    deleteChecked(partial)
+                    return@use true
                 }
-
-                val body = response.body ?: run {
-                    _state.value = ModelDownloadState.Failed("Empty response body")
-                    return
+                if (response.code != 200 && response.code != 206) {
+                    throw IOException("Download failed: HTTP ${response.code}; retry to resume")
                 }
-
-                val isResuming = response.code == 206
-                val contentLength = body.contentLength()
-                val totalBytes = if (isResuming) resumeFrom + contentLength else contentLength
-
-                val sink = if (isResuming) {
-                    java.io.FileOutputStream(partFile, /* append = */ true)
+                val encoding = response.header("Content-Encoding")
+                if (encoding != null && !encoding.equals("identity", ignoreCase = true)) {
+                    throw IOException("Server returned an encoded model; cannot safely resume")
+                }
+                val body = response.body ?: throw IOException("Empty model response")
+                val append = response.code == 206
+                val start = if (append) resumeFrom else 0L
+                val responseEnd = if (append) {
+                    validateModelContentRange(
+                        response.header("Content-Range"), resumeFrom, model.expectedBytes, body.contentLength()
+                    )
                 } else {
-                    java.io.FileOutputStream(partFile, /* append = */ false)
+                    if (response.header("Content-Range") != null) {
+                        throw IOException("Server returned Content-Range without HTTP 206")
+                    }
+                    if (body.contentLength() >= 0 && body.contentLength() != model.expectedBytes) {
+                        throw IOException("Model size differs from the published size (${model.expectedBytes} bytes)")
+                    }
+                    model.expectedBytes
                 }
-
-                var bytesWritten = if (isResuming) resumeFrom else 0L
-                sink.use { out ->
-                    body.byteStream().use { input ->
-                        val buffer = ByteArray(64 * 1024)
-                        var lastReportedMb = -1L
-                        while (true) {
-                            val read = input.read(buffer)
-                            if (read == -1) break
-                            out.write(buffer, 0, read)
-                            bytesWritten += read
-
-                            // Throttle StateFlow updates to roughly once per MB
-                            // to avoid flooding Compose recomposition.
-                            val currentMb = bytesWritten / (1024 * 1024)
-                            if (currentMb != lastReportedMb) {
-                                lastReportedMb = currentMb
-                                _state.value = ModelDownloadState.Downloading(bytesWritten, totalBytes)
+                // A 200 response replaces the partial and can reclaim its existing storage.
+                val additionalBytes = model.expectedBytes - resumeFrom
+                val availableBytes = modelsDir.usableSpace
+                if (availableBytes > 0 && availableBytes < additionalBytes) {
+                    throw IOException("Not enough storage: need $additionalBytes more bytes for this model")
+                }
+                var written = start
+                _state.value = ModelDownloadState.Downloading(written, model.expectedBytes)
+                try {
+                    FileOutputStream(partial, append).use { output ->
+                        body.byteStream().use { input ->
+                            val buffer = ByteArray(64 * 1024)
+                            var lastReported = written
+                            while (true) {
+                                val count = input.read(buffer)
+                                if (count == -1) break
+                                if (count == 0) continue
+                                if (count.toLong() > responseEnd - written) {
+                                    throw CorruptModelException("Server sent more model bytes than expected")
+                                }
+                                output.write(buffer, 0, count)
+                                written += count
+                                if (written - lastReported >= 1024 * 1024 || written == model.expectedBytes) {
+                                    _state.value = ModelDownloadState.Downloading(written, model.expectedBytes)
+                                    lastReported = written
+                                }
                             }
                         }
+                        output.fd.sync()
                     }
+                } catch (error: CorruptModelException) {
+                    deleteChecked(partial)
+                    throw IOException("${error.message}. Corrupt download removed; please retry.", error)
                 }
-
-                if (totalBytes > 0 && bytesWritten < totalBytes) {
-                    _state.value = ModelDownloadState.Failed(
-                        "Download incomplete ($bytesWritten of $totalBytes bytes) - retry to resume"
-                    )
-                    return
+                if (written != model.expectedBytes) {
+                    throw IOException("Download incomplete ($written of ${model.expectedBytes} bytes); retry to resume")
                 }
-
-                // Sanity-check the file is actually a GGUF model before treating
-                // it as complete. A byte-count match against Content-Length
-                // alone doesn't prove the bytes are real - if the server (or a
-                // proxy in between) ever returned an error/redirect page with a
-                // misleading Content-Length, or a download got silently
-                // truncated/corrupted, this would previously still get renamed
-                // to the final .gguf name and reported as available, and
-                // NemotronTranscriber.start() would try to load garbage as a
-                // model - which can fail silently or hang rather than
-                // producing a clean error, looking exactly like "downloaded
-                // fine but transcription never starts." GGUF files always
-                // begin with the 4 magic bytes 'G','G','U','F' (0x47475546
-                // little-endian) - cheap to check, catches this whole class
-                // of corruption before it ever reaches the native loader.
-                if (!looksLikeGguf(partFile)) {
-                    partFile.delete()
-                    _state.value = ModelDownloadState.Failed(
-                        "Downloaded file is not a valid GGUF model (bad magic bytes) - deleted, please retry"
-                    )
-                    return
-                }
-
-                // Atomic-ish completion: only becomes visible to
-                // ForegroundListeningService's file-existence check after
-                // the full download succeeds.
-                if (!partFile.renameTo(finalFile)) {
-                    _state.value = ModelDownloadState.Failed("Failed to finalize downloaded file")
-                    return
-                }
-
-                _state.value = ModelDownloadState.Completed
+                false
             }
-        } catch (e: IOException) {
-            _state.value = ModelDownloadState.Failed(e.message ?: "Network error - retry to resume")
+            if (!retryClean) return
+            retriedUnsatisfiedRange = true
         }
     }
 
-    /** True if the file starts with the GGUF magic bytes ('G','G','U','F'). */
-    private fun looksLikeGguf(file: File): Boolean {
-        return try {
-            file.inputStream().use { input ->
-                val magic = ByteArray(4)
-                val read = input.read(magic)
-                read == 4 && magic[0] == 'G'.code.toByte() && magic[1] == 'G'.code.toByte() &&
-                    magic[2] == 'U'.code.toByte() && magic[3] == 'F'.code.toByte()
-            }
-        } catch (_: IOException) {
-            false
+    /** Blocking file I/O; never queues a deletion behind a potentially lengthy transfer. */
+    fun delete(model: SpeechModel) {
+        if (!operationLock.tryLock()) return
+        try {
+            deleteAndReportResult(model)
+        } finally {
+            operationLock.unlock()
         }
     }
 
-    /** Deletes a downloaded (or partially downloaded) model file to free space. */
-    fun delete(quant: NemotronQuant) {
-        modelFile(quant).delete()
-        partFile(quant).delete()
-        _state.value = ModelDownloadState.Idle
+    private fun deleteAndReportResult(model: SpeechModel) {
+        try {
+            deleteUnusedModel(model)
+        } catch (error: IOException) {
+            _downloadTarget.value = model
+            _state.value = ModelDownloadState.Failed(error.message ?: "Could not delete model")
+        } catch (error: SecurityException) {
+            _downloadTarget.value = model
+            _state.value = ModelDownloadState.Failed("Cannot delete model: ${error.message.orEmpty()}")
+        }
+        refreshDownloadedModels()
+    }
+
+    private fun deleteUnusedModel(model: SpeechModel) = synchronized(captureGuard) {
+        if ((captureUsers[model] ?: 0) == 0) {
+            deleteChecked(modelFile(model))
+            deleteChecked(partFile(model))
+            if (_downloadTarget.value == model) {
+                _downloadTarget.value = null
+                _state.value = ModelDownloadState.Idle
+            }
+        }
+    }
+}
+
+private class CorruptModelException(message: String) : IOException(message)
+
+private fun deleteChecked(file: File) {
+    if (file.exists() && !file.delete()) throw IOException("Could not remove model file ${file.name}")
+}
+
+private fun looksLikeGguf(file: File): Boolean = try {
+    file.inputStream().use { input ->
+        val magic = ByteArray(4)
+        input.read(magic) == 4 && magic.contentEquals(byteArrayOf(0x47, 0x47, 0x55, 0x46))
+    }
+} catch (_: IOException) {
+    false
+} catch (_: SecurityException) {
+    false
+}
+
+/** Validates a resumed response before a single byte can be appended; returns its exclusive end. */
+internal fun validateModelContentRange(header: String?, start: Long, total: Long, bodyLength: Long): Long {
+    val match = Regex("bytes ([0-9]+)-([0-9]+)/([0-9]+)").matchEntire(header.orEmpty())
+        ?: throw IOException("Server returned an invalid Content-Range; partial download preserved")
+    val from = match.groupValues[1].toLongOrNull()
+    val through = match.groupValues[2].toLongOrNull()
+    val size = match.groupValues[3].toLongOrNull()
+    if (from != start || size != total || through == null || through < start || through >= total) {
+        throw IOException("Server returned a mismatched Content-Range; partial download preserved")
+    }
+    val length = through - start + 1
+    if (bodyLength >= 0 && bodyLength != length) {
+        throw IOException("Server returned a mismatched range length; partial download preserved")
+    }
+    return through + 1
+}
+
+/** All downloaded bytes must match the immutable catalog, including legacy completed files. */
+internal fun verifyModelFile(file: File, expectedBytes: Long, expectedSha256: String) {
+    if (!file.isFile || file.length() != expectedBytes) {
+        throw CorruptModelException("Model size does not match the published size")
+    }
+    if (!looksLikeGguf(file)) throw CorruptModelException("Downloaded file is not a GGUF model")
+    val digest = MessageDigest.getInstance("SHA-256")
+    file.inputStream().use { input ->
+        val buffer = ByteArray(64 * 1024)
+        while (true) {
+            val count = input.read(buffer)
+            if (count == -1) break
+            if (count > 0) digest.update(buffer, 0, count)
+        }
+    }
+    val actual = digest.digest().joinToString("") { "%02x".format(it) }
+    if (!actual.equals(expectedSha256, ignoreCase = true)) {
+        throw CorruptModelException("Model checksum does not match the published SHA-256")
     }
 }

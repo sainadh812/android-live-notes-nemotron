@@ -6,6 +6,7 @@
 #include <vector>
 
 #include "../nemotron_jni.cpp"
+#include "host_utf16.h"
 
 struct transcribe_model {};
 struct transcribe_session {};
@@ -24,10 +25,21 @@ int finalizeCalls = 0;
 int freedModels = 0;
 int freedSessions = 0;
 int releasedPcmArrays = 0;
+std::string modelFamily = "parakeet";
+bool englishOnly = false;
+bool streamFinalized = false;
+bool wasTruncated = false;
+std::string committedText = "Hello ", tentativeText = "world", finalTextValue = "Hello world.";
+std::vector<jchar> lastStringUnits;
 
 std::string & javaString(jstring value) { return *reinterpret_cast<std::string *>(value); }
-jstring newString(JNIEnv *, const char * value) {
-    return reinterpret_cast<jstring>(new std::string(value));
+jstring newString(JNIEnv *, const char *) {
+    assert(false && "Engine UTF-8 must not reach NewStringUTF");
+    return nullptr;
+}
+jstring newUtf16String(JNIEnv *, const jchar * units, jsize length) {
+    lastStringUnits.assign(units, units + length);
+    return reinterpret_cast<jstring>(new std::string(hostUtf16ToUtf8(units, length)));
 }
 const char * stringChars(JNIEnv *, jstring value, jboolean *) { return javaString(value).c_str(); }
 void releaseChars(JNIEnv *, jstring, const char *) {}
@@ -75,6 +87,10 @@ void transcribe_model_load_params_init(transcribe_model_load_params * params) {
     std::memset(params, 0, sizeof(*params));
     params->struct_size = sizeof(*params);
 }
+void transcribe_session_params_init(transcribe_session_params * params) {
+    std::memset(params, 0, sizeof(*params));
+    params->struct_size = sizeof(*params);
+}
 void transcribe_run_params_init(transcribe_run_params * params) {
     std::memset(params, 0, sizeof(*params));
     params->struct_size = sizeof(*params);
@@ -85,8 +101,36 @@ void transcribe_stream_params_init(transcribe_stream_params * params) {
 }
 void transcribe_parakeet_stream_ext_init(transcribe_parakeet_stream_ext * extension) {
     std::memset(extension, 0, sizeof(*extension));
+    extension->ext.size = sizeof(*extension);
+    extension->ext.kind = TRANSCRIBE_EXT_KIND_PARAKEET_STREAM;
     extension->att_context_right = -1;
 }
+void transcribe_moonshine_streaming_stream_ext_init(transcribe_moonshine_streaming_stream_ext * extension) {
+    std::memset(extension, 0, sizeof(*extension));
+    extension->ext.size = sizeof(*extension);
+    extension->ext.kind = TRANSCRIBE_EXT_KIND_MOONSHINE_STREAMING_STREAM;
+    extension->min_decode_interval_ms = -1;
+}
+void transcribe_capabilities_init(transcribe_capabilities * caps) {
+    std::memset(caps, 0, sizeof(*caps));
+    caps->struct_size = sizeof(*caps);
+}
+transcribe_status transcribe_model_get_capabilities(const transcribe_model *, transcribe_capabilities * caps) {
+    assert(caps->struct_size == sizeof(*caps));
+    static const char * multilingual[] = {"en-US", "en", "fr-FR"};
+    static const char * english[] = {"en"};
+    caps->native_sample_rate = 16000;
+    caps->supports_streaming = true;
+    caps->n_languages = englishOnly ? 1 : 3;
+    caps->languages = englishOnly ? english : multilingual;
+    return TRANSCRIBE_OK;
+}
+bool transcribe_model_accepts_ext_kind(const transcribe_model *, transcribe_ext_slot slot, uint32_t kind) {
+    assert(slot == TRANSCRIBE_EXT_SLOT_STREAM);
+    return (modelFamily == "parakeet" && kind == TRANSCRIBE_EXT_KIND_PARAKEET_STREAM) ||
+        (modelFamily == "moonshine_streaming" && kind == TRANSCRIBE_EXT_KIND_MOONSHINE_STREAMING_STREAM);
+}
+bool transcribe_was_truncated(const transcribe_session *) { return wasTruncated; }
 void transcribe_stream_update_init(transcribe_stream_update * update) {
     std::memset(update, 0, sizeof(*update));
     update->struct_size = sizeof(*update);
@@ -101,8 +145,9 @@ transcribe_status transcribe_model_load_file(const char *, const transcribe_mode
     *model = loadStatus == TRANSCRIBE_OK ? new transcribe_model : nullptr;
     return loadStatus;
 }
-transcribe_status transcribe_session_init(transcribe_model *, const transcribe_session_params *,
+transcribe_status transcribe_session_init(transcribe_model *, const transcribe_session_params * params,
                                           transcribe_session ** session) {
+    assert(params != nullptr && params->struct_size == sizeof(*params) && params->n_threads == 4);
     *session = sessionStatus == TRANSCRIBE_OK ? new transcribe_session : nullptr;
     return sessionStatus;
 }
@@ -110,7 +155,23 @@ transcribe_status transcribe_stream_begin(transcribe_session *, const transcribe
                                           const transcribe_stream_params * stream) {
     assert(params->struct_size == sizeof(*params));
     assert(stream->struct_size == sizeof(*stream));
-    assert(std::string(params->language) == "en-US");
+    if (std::string(params->language) != (englishOnly ? "en" : "en-US")) return TRANSCRIBE_ERR_UNSUPPORTED_LANGUAGE;
+    assert(stream->family != nullptr);
+    if (modelFamily == "moonshine_streaming") {
+        assert(stream->family->kind == TRANSCRIBE_EXT_KIND_MOONSHINE_STREAMING_STREAM);
+        auto * extension = reinterpret_cast<const transcribe_moonshine_streaming_stream_ext *>(stream->family);
+        assert(extension->ext.size == sizeof(*extension));
+        assert(extension->min_decode_interval_ms == 500);
+        assert(stream->commit_policy == TRANSCRIBE_STREAM_COMMIT_ON_FINALIZE);
+    } else {
+        assert(stream->family->kind == TRANSCRIBE_EXT_KIND_PARAKEET_STREAM);
+        auto * extension = reinterpret_cast<const transcribe_parakeet_stream_ext *>(stream->family);
+        assert(extension->ext.size == sizeof(*extension));
+        assert(extension->att_context_right == -1);
+        assert(stream->commit_policy == TRANSCRIBE_STREAM_COMMIT_AUTO);
+    }
+    streamFinalized = false;
+    wasTruncated = false;
     return beginStatus;
 }
 transcribe_status transcribe_stream_feed(transcribe_session *, const float *, int count,
@@ -122,16 +183,17 @@ transcribe_status transcribe_stream_feed(transcribe_session *, const float *, in
 }
 transcribe_status transcribe_stream_get_text(const transcribe_session *, transcribe_stream_text * text) {
     assert(text->struct_size == sizeof(*text));
-    text->committed_text = "Hello ";
-    text->tentative_text = "world";
+    text->committed_text = streamFinalized ? finalTextValue.c_str() : committedText.c_str();
+    text->tentative_text = streamFinalized ? "" : tentativeText.c_str();
     return textStatus;
 }
 transcribe_status transcribe_stream_finalize(transcribe_session *, transcribe_stream_update * update) {
     if (update && update->struct_size < 40) return TRANSCRIBE_ERR_BAD_STRUCT_SIZE;
     ++finalizeCalls;
+    streamFinalized = finalizeStatus == TRANSCRIBE_OK;
     return finalizeStatus;
 }
-const char * transcribe_full_text(const transcribe_session *) { return "Hello world."; }
+const char * transcribe_full_text(const transcribe_session *) { return "Raw rewrite must never replace committed text."; }
 void transcribe_session_free(transcribe_session * session) { ++freedSessions; delete session; }
 void transcribe_model_free(transcribe_model * model) { ++freedModels; delete model; }
 } // extern "C"
@@ -139,6 +201,7 @@ void transcribe_model_free(transcribe_model * model) { ++freedModels; delete mod
 int main() {
     JNINativeInterface_ functions{};
     functions.NewStringUTF = newString;
+    functions.NewString = newUtf16String;
     functions.GetStringUTFChars = stringChars;
     functions.ReleaseStringUTFChars = releaseChars;
     functions.ExceptionCheck = hasException;
@@ -182,33 +245,90 @@ int main() {
 
     textStatus = TRANSCRIBE_ERR_BACKEND;
     assert(feed(&env, nullptr, handle, samples) == nullptr);
-    expectError("Reading Nemotron transcript", TRANSCRIBE_ERR_BACKEND);
+    expectError("Reading speech transcript", TRANSCRIBE_ERR_BACKEND);
     textStatus = TRANSCRIBE_OK;
     assert(restart(&env, nullptr, handle, locale, -1) == JNI_TRUE);
 
     finalizeStatus = TRANSCRIBE_ERR_BACKEND;
     assert(finalize(&env, nullptr, handle) == nullptr);
-    expectError("Finalizing Nemotron transcript", TRANSCRIBE_ERR_BACKEND);
+    expectError("Finalizing speech transcript", TRANSCRIBE_ERR_BACKEND);
     finalizeStatus = TRANSCRIBE_OK;
     destroy(&env, nullptr, handle);
     assert(freedModels == 1 && freedSessions == 1);
 
     loadStatus = TRANSCRIBE_ERR_GGUF;
     assert(init(&env, nullptr, path, locale, -1) == 0);
-    expectError("Loading Nemotron model", TRANSCRIBE_ERR_GGUF);
+    expectError("Loading speech model", TRANSCRIBE_ERR_GGUF);
     assert(freedModels == 1 && freedSessions == 1);
     loadStatus = TRANSCRIBE_OK;
 
     sessionStatus = TRANSCRIBE_ERR_BACKEND;
     assert(init(&env, nullptr, path, locale, -1) == 0);
-    expectError("Creating Nemotron session", TRANSCRIBE_ERR_BACKEND);
+    expectError("Creating speech session", TRANSCRIBE_ERR_BACKEND);
     assert(freedModels == 2 && freedSessions == 1);
     sessionStatus = TRANSCRIBE_OK;
 
     beginStatus = TRANSCRIBE_ERR_UNSUPPORTED_LANGUAGE;
     assert(init(&env, nullptr, path, locale, -1) == 0);
-    expectError("Starting Nemotron stream", TRANSCRIBE_ERR_UNSUPPORTED_LANGUAGE);
+    expectError("Starting speech stream", TRANSCRIBE_ERR_UNSUPPORTED_LANGUAGE);
     assert(freedModels == 3 && freedSessions == 2);
 
-    std::cout << "JNI contract tests passed: initialized feed/finalize, transcript, errors, cleanup.\n";
+    beginStatus = TRANSCRIBE_OK;
+    englishOnly = true;
+    for (const char * family : {"parakeet", "moonshine_streaming"}) {
+        modelFamily = family;
+        const jlong alternative = init(&env, nullptr, path, locale, -1);
+        assert(alternative != 0 && pendingException.empty());
+        assert(Java_com_sainadh_livenotes_stt_NemotronTranscriber_nativeWasTruncated(&env, nullptr, alternative) == JNI_FALSE);
+        wasTruncated = true;
+        assert(Java_com_sainadh_livenotes_stt_NemotronTranscriber_nativeWasTruncated(&env, nullptr, alternative) == JNI_TRUE);
+        auto stableFinal = finalize(&env, nullptr, alternative);
+        assert(javaString(stableFinal) == "Hello world.");
+        deleteString(stableFinal);
+        assert(restart(&env, nullptr, alternative, locale, -1) == JNI_TRUE);
+        assert(Java_com_sainadh_livenotes_stt_NemotronTranscriber_nativeWasTruncated(&env, nullptr, alternative) == JNI_FALSE);
+        destroy(&env, nullptr, alternative);
+    }
+    modelFamily = "unsupported";
+    assert(init(&env, nullptr, path, locale, -1) == 0);
+    expectError("Starting speech stream", TRANSCRIBE_ERR_NOT_IMPLEMENTED);
+    modelFamily = "moonshine_streaming";
+    language = "fr-FR";
+    assert(init(&env, nullptr, path, locale, -1) == 0);
+    expectError("Starting speech stream", TRANSCRIBE_ERR_UNSUPPORTED_LANGUAGE);
+    assert(freedModels == 7 && freedSessions == 6);
+
+    language = "en-US";
+    const jlong unicodeHandle = init(&env, nullptr, path, locale, -1);
+    assert(unicodeHandle != 0);
+    committedText = u8"नमस्ते 𠮷 ";
+    tentativeText = u8"🙂";
+    finalTextValue = committedText + tentativeText;
+    auto unicodePartial = feed(&env, nullptr, unicodeHandle, samples);
+    assert(javaString(unicodePartial) == committedText + '\x01' + tentativeText);
+    const std::u16string expectedPartial = u"नमस्ते 𠮷 \x01🙂";
+    assert(std::vector<jchar>(expectedPartial.begin(), expectedPartial.end()) == lastStringUnits);
+    deleteString(unicodePartial);
+    auto unicodeFinal = finalize(&env, nullptr, unicodeHandle);
+    assert(javaString(unicodeFinal) == finalTextValue);
+    const std::u16string expectedFinal = u"नमस्ते 𠮷 🙂";
+    assert(std::vector<jchar>(expectedFinal.begin(), expectedFinal.end()) == lastStringUnits);
+    deleteString(unicodeFinal);
+    destroy(&env, nullptr, unicodeHandle);
+
+    // Truncated, overlong, surrogate, and out-of-range UTF-8 never reach CheckJNI.
+    for (const auto & invalid : {std::string("\xE2\x82"), std::string("\xC0\xAF"),
+                                std::string("\xED\xA0\x80"), std::string("\xF4\x90\x80\x80")}) {
+        auto replaced = makeJString(&env, invalid.c_str());
+        assert(lastStringUnits == std::vector<jchar>(invalid.size(), 0xFFFD));
+        deleteString(replaced);
+    }
+    auto mixed = makeJString(&env, "A\xFF" "B");
+    assert((lastStringUnits == std::vector<jchar>{'A', 0xFFFD, 'B'}));
+    deleteString(mixed);
+    auto empty = makeJString(&env, nullptr);
+    assert(lastStringUnits.empty());
+    deleteString(empty);
+
+    std::cout << "JNI contract tests passed: feed/finalize, family extensions, locale mapping, stable final text, Unicode, truncation, cleanup.\n";
 }

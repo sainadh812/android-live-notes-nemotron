@@ -34,6 +34,7 @@ fetch_header() {
 
 fetch_header transcribe.h 07fff3489a3c282ab7ee8835b010f1f9f9abd5b61426f8c0e80424dabaaf9a6b
 fetch_header transcribe/parakeet.h 969a8d124ae837cdff3038f22a1a6037f5a68d5f906a4cf731154cb756b3b132
+fetch_header transcribe/moonshine_streaming.h fe67db1635f2c15059d88f54095f6c14c6ae315e09f9a1d447d0f075f5de5e20
 
 java_sdk="${JAVA_HOME:-}"
 if [[ -z "$java_sdk" ]]; then

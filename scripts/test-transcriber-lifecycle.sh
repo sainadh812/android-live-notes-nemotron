@@ -26,6 +26,6 @@ for name in ggml-base ggml ggml-cpu transcribe; do
     ln -s libnemotron_jni.so "$TASK_BUILD_DIR/lib/lib$name.so"
 done
 java -cp "$TASK_KOTLIN_LIB/*" org.jetbrains.kotlin.cli.jvm.K2JVMCompiler     -no-stdlib -no-reflect -jvm-target 17     -classpath "$TASK_BUILD_DIR/classes:${TASK_STDLIB[0]}" -d "$TASK_BUILD_DIR/classes"     "$TASK_REPO_ROOT/app/src/main/java/com/sainadh/livenotes/stt/NemotronTranscriber.kt"     "$TASK_REPO_ROOT/app/src/main/java/com/sainadh/livenotes/stt/NativeTranscriptSegments.kt"     "$TASK_REPO_ROOT/app/src/main/java/com/sainadh/livenotes/stt/TranscriptUpdate.kt"     "$TASK_REPO_ROOT/tests/host/src/Listener.kt" "$TASK_REPO_ROOT/tests/host/src/LifecycleTest.kt"
-for scenario in stop-init destroy-init stop-feed destroy-feed restart restart-failure     init-failure feed-failure finalize-failure audio-init audio-start audio-read idle-stop slow-feed-queue queued-tail overflow destroy-queue read-error-tail feed-error-partial tail-limit segments; do
+for scenario in stop-init destroy-init stop-feed destroy-feed restart restart-failure     init-failure feed-failure finalize-failure audio-init audio-start audio-read idle-stop slow-feed-queue queued-tail overflow destroy-queue read-error-tail feed-error-partial tail-limit truncated-feed truncated-finalize destroy-completion segments; do
     timeout 15s java -Djava.library.path="$TASK_BUILD_DIR/lib"         -cp "$TASK_BUILD_DIR/classes:${TASK_STDLIB[0]}" LifecycleTestKt "$scenario"
 done

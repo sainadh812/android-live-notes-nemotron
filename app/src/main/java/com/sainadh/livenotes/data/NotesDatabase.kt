@@ -56,6 +56,9 @@ data class TranscriptSegmentEntity(
 
 @Dao
 interface TranscriptSegmentDao {
+    @Query("SELECT * FROM transcript_segments ORDER BY createdAtEpochMs ASC, recordingId ASC, segmentId ASC")
+    fun observeAll(): Flow<List<TranscriptSegmentEntity>>
+
     @Query("SELECT * FROM transcript_segments WHERE recordingId = :recordingId AND segmentId = :segmentId")
     suspend fun get(recordingId: String, segmentId: Long): TranscriptSegmentEntity?
 
@@ -116,6 +119,9 @@ interface DailyNoteDao {
 
 @Dao
 interface TranscriptChunkDao {
+    @Query("SELECT * FROM transcript_chunks ORDER BY createdAtEpochMs ASC, id ASC")
+    fun observeAll(): Flow<List<TranscriptChunkEntity>>
+
     @Insert
     suspend fun insert(chunk: TranscriptChunkEntity)
 

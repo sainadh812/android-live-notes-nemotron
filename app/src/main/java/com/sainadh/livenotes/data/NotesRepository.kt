@@ -7,6 +7,9 @@ import androidx.room.withTransaction
 import com.sainadh.livenotes.stt.TranscriptUpdate
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.flowOn
+import kotlinx.coroutines.Dispatchers
 import kotlinx.serialization.builtins.ListSerializer
 import kotlinx.serialization.builtins.serializer
 import kotlinx.serialization.json.Json
@@ -39,6 +42,10 @@ class NotesRepository(
     fun observeAll(): Flow<List<DailyNote>> = dailyNoteDao.observeAll().map { list ->
         list.map { it.toModel(json) }
     }
+
+    fun observeSavedRecordings(): Flow<List<SavedRecording>> = combine(
+        segmentDao.observeAll(), transcriptChunkDao.observeAll()
+    ) { segments, legacy -> savedRecordings(segments, legacy) }.flowOn(Dispatchers.Default)
 
     suspend fun getNote(dateKey: String): DailyNote? = dailyNoteDao.getOne(dateKey)?.toModel(json)
 

@@ -9,6 +9,7 @@ import com.sainadh.livenotes.stt.TranscriptStatus
 import com.sainadh.livenotes.stt.TranscriptUpdate
 import java.io.File
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicInteger
 
 private fun await(label: String, condition: () -> Boolean) {
     val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5)
@@ -69,9 +70,12 @@ fun main(args: Array<String>) {
                     await("stop after init") { stopCount() == 1 }
                     check(Gate.finalizes.get() == 1)
                 } else {
-                    promptly { transcriber.destroy() }
+                    val completed = AtomicInteger()
+                    promptly { transcriber.destroy { completed.incrementAndGet() } }
+                    check(completed.get() == 0)
                     Gate.release.countDown()
-                    await("destroy after init") { Gate.destroys.get() == 1 }
+                    await("destroy completion after init") { completed.get() == 1 }
+                    check(Gate.destroys.get() == 1)
                     check(events.isEmpty()) { "Callbacks delivered after destruction: $events" }
                 }
                 check(Gate.inits.get() == 1)
@@ -94,10 +98,12 @@ fun main(args: Array<String>) {
                     check(events.last() == "stopped") { "Transcript delivered after stop completed" }
                 } else {
                     val before = events.size
-                    promptly { transcriber.destroy() }
-                    check(Gate.destroys.get() == 0)
+                    val completed = AtomicInteger()
+                    promptly { transcriber.destroy { completed.incrementAndGet() } }
+                    check(Gate.destroys.get() == 0 && completed.get() == 0)
                     Gate.release.countDown()
-                    await("deferred destroy") { Gate.destroys.get() == 1 }
+                    await("deferred destroy completion") { completed.get() == 1 }
+                    check(Gate.destroys.get() == 1)
                     check(events.size == before) { "Callback delivered after destruction" }
                 }
                 check(AudioRecord.releases.get() == 1)
@@ -186,6 +192,35 @@ fun main(args: Array<String>) {
                 check(events.single { it.startsWith("error:") }.contains("could not keep up"))
                 check(events.indexOfFirst { it.startsWith("error:") } < events.indexOf("final:final transcript"))
                 check(events.last() == "stopped")
+            }
+            "destroy-completion" -> {
+                Gate.blockOperation = "feed"
+                startAndFeed()
+                val completed = AtomicInteger()
+                transcriber.destroy { error("One caller failed cleanup") }
+                transcriber.destroy {
+                    check(Gate.destroys.get() == 1 && AudioRecord.releases.get() == 1)
+                    completed.incrementAndGet()
+                }
+                transcriber.destroy { completed.incrementAndGet() }
+                check(completed.get() == 0)
+                Gate.release.countDown()
+                await("all destroy completions after release") { completed.get() == 2 }
+                transcriber.destroy { completed.incrementAndGet() }
+                check(completed.get() == 3 && Gate.destroys.get() == 1)
+            }
+            "truncated-feed", "truncated-finalize" -> {
+                Gate.truncateOperation = scenario.removePrefix("truncated-")
+                startAndFeed()
+                if (scenario == "truncated-finalize") transcriber.stop()
+                await("output limit is surfaced") { stopCount() == 1 }
+                check(events.single { it.startsWith("error:") }.contains("output limit"))
+                if (scenario == "truncated-feed") {
+                    check(updates.last().text == "tentative" && updates.last().status == TranscriptStatus.INTERRUPTED)
+                } else {
+                    check(updates.last().text == "final transcript" && updates.last().status == TranscriptStatus.FINAL)
+                }
+                check(Gate.destroys.get() == 1 && AudioRecord.releases.get() == 1)
             }
             "segments" -> {
                 val assembler = NativeTranscriptSegments()

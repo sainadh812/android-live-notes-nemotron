@@ -31,3 +31,10 @@ JNIEXPORT void JNICALL Java_com_sainadh_livenotes_stt_NemotronTranscriber_native
     jmethodID method = (*env)->GetStaticMethodID(env, gate, "destroy", "()V");
     (*env)->CallStaticVoidMethod(env, gate, method);
 }
+
+JNIEXPORT jboolean JNICALL Java_com_sainadh_livenotes_stt_NemotronTranscriber_nativeWasTruncated(
+        JNIEnv *env, jobject self, jlong handle) {
+    jclass gate = (*env)->FindClass(env, "check/Gate");
+    jfieldID field = (*env)->GetStaticFieldID(env, gate, "truncated", "Z");
+    return (*env)->GetStaticBooleanField(env, gate, field);
+}

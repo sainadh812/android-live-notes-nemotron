@@ -7,7 +7,7 @@ model download, emulator, or network connection is needed once Gradle exists.
 
 The harness compiles the actual `NemotronTranscriber.kt`, native transcript
 segment assembly, and shared update contract with small Android and JNI stubs.
-Its 21 deterministic scenarios cover:
+Its 24 deterministic scenarios cover:
 
 - Cancellation during model initialization and inference, duplicate starts/stops,
   model reuse, native restart/init/feed/finalize failures, and microphone errors.
@@ -18,6 +18,10 @@ Its 21 deterministic scenarios cover:
   preserving accepted audio and reporting the loss before the stopped callback.
 - Preserving an incomplete capture chunk after a read error; marking the latest
   hypothesis interrupted on native failure; discarding queued work on destroy.
+- Deferred destroy completions during held init/feed calls and repeated destroy,
+  enabling model download/delete leases to outlive every native read.
+- Explicit output-window truncation after feed or finalize, retaining returned
+  text before stopping instead of silently declaring the recording complete.
 - Stable complete-word segments, one replaceable tentative tail, exact whitespace
   and punctuation, empty-tail clearing, and rejection of committed-prefix changes.
 
