@@ -1,4 +1,5 @@
 import java.util.Properties
+import java.security.MessageDigest
 
 fun loadEmbeddedEnvValue(name: String): String {
     val envFile = rootProject.file("../../.env")
@@ -21,16 +22,20 @@ plugins {
     id("com.google.devtools.ksp")
 }
 
+val previewBuild = providers.gradleProperty("previewBuild").orNull == "true"
+
 android {
     namespace = "com.sainadh.livenotes"
     compileSdk = 35
+    ndkVersion = "27.2.12479018"
 
     defaultConfig {
-        applicationId = "com.sainadh.livenotes"
+        applicationId = if (previewBuild) "com.sainadh.livenotes.preview" else "com.sainadh.livenotes"
         minSdk = 26
         targetSdk = 35
-        versionCode = 1
-        versionName = "1.0"
+        versionCode = 2
+        versionName = if (previewBuild) "1.0.1-preview" else "1.0.1"
+        manifestPlaceholders["appLabel"] = if (previewBuild) "LiveMeetingNotes Preview" else "@string/app_name"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables {
@@ -100,6 +105,28 @@ android {
         }
     }
 }
+
+val verifyNativeJni by tasks.registering {
+    group = "verification"
+    description = "Rejects stale JNI binaries; rebuild them with scripts/build-native-jni.sh."
+    val source = layout.projectDirectory.file("src/main/cpp/nemotron_jni.cpp")
+    val binary = layout.projectDirectory.file("src/main/jniLibs/arm64-v8a/libnemotron_jni.so")
+    val metadata = layout.projectDirectory.file("src/main/jniLibs/nemotron-jni-build.properties")
+    inputs.files(source, binary, metadata)
+    doLast {
+        val properties = Properties().apply { metadata.asFile.inputStream().use(::load) }
+        fun sha256(file: java.io.File): String =
+            MessageDigest.getInstance("SHA-256").digest(file.readBytes()).joinToString("") { "%02x".format(it) }
+        check(properties.getProperty("sourceSha256") == sha256(source.asFile)) {
+            "JNI source changed without rebuilding its binary. Run scripts/build-native-jni.sh."
+        }
+        check(properties.getProperty("binarySha256") == sha256(binary.asFile)) {
+            "JNI binary does not match its build record. Run scripts/build-native-jni.sh."
+        }
+    }
+}
+
+tasks.named("preBuild").configure { dependsOn(verifyNativeJni) }
 
 dependencies {
     val composeBom = platform("androidx.compose:compose-bom:2024.06.00")

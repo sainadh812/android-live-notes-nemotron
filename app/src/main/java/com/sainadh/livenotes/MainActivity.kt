@@ -95,7 +95,8 @@ private fun LiveNotesScreen(
     val latestTranscript by viewModel.latestTranscript.collectAsStateWithLifecycle(lifecycle = activityLifecycle)
     val connectionStatus by viewModel.connectionStatus.collectAsStateWithLifecycle(lifecycle = activityLifecycle)
     val currentAudioRoute by ServiceStateTracker.audioRoute.collectAsStateWithLifecycle(lifecycle = activityLifecycle)
-    val lastSummaryError by ServiceStateTracker.lastSummaryError.collectAsStateWithLifecycle(lifecycle = activityLifecycle)
+    val lastSummaryError by viewModel.summaryError.collectAsStateWithLifecycle(lifecycle = activityLifecycle)
+    val transcriptionError by ServiceStateTracker.lastTranscriptionError.collectAsStateWithLifecycle(lifecycle = activityLifecycle)
     val modelDownloadState by viewModel.modelDownloadState.collectAsStateWithLifecycle(lifecycle = activityLifecycle)
     var apiKey by rememberSaveable { mutableStateOf("") }
     var selectedProvider by rememberSaveable { mutableStateOf(viewModel.currentProvider()) }
@@ -107,27 +108,27 @@ private fun LiveNotesScreen(
     val permissionLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestMultiplePermissions()
     ) { granted ->
-        val allGranted = granted.values.all { it }
-        if (allGranted) {
-            viewModel.toggleListening()
+        val microphoneGranted = granted[Manifest.permission.RECORD_AUDIO]
+            ?: (ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED)
+        if (microphoneGranted) {
+            viewModel.startListening()
+        } else {
+            ServiceStateTracker.lastTranscriptionError.value = "Microphone permission is required to capture speech. Enable it in the app's permission settings, then try again."
         }
     }
 
-    fun requiredPermissions(): Array<String> {
+    fun missingPermissions(): Array<String> {
         val perms = mutableListOf(Manifest.permission.RECORD_AUDIO)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             perms += Manifest.permission.POST_NOTIFICATIONS
         }
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S &&
+            viewModel.currentAudioInputMode() != AudioInputMode.PHONE_MIC) {
             perms += Manifest.permission.BLUETOOTH_CONNECT
         }
-        return perms.toTypedArray()
-    }
-
-    fun canListenNow(): Boolean {
-        return requiredPermissions().all { permission ->
-            ContextCompat.checkSelfPermission(context, permission) == PackageManager.PERMISSION_GRANTED
-        }
+        return perms.filter { permission ->
+            ContextCompat.checkSelfPermission(context, permission) != PackageManager.PERMISSION_GRANTED
+        }.toTypedArray()
     }
 
     Scaffold(
@@ -146,10 +147,12 @@ private fun LiveNotesScreen(
                     isListening = isListening,
                     currentAudioRoute = currentAudioRoute,
                     onToggle = {
-                        if (canListenNow()) {
-                            viewModel.toggleListening()
+                        if (isListening) {
+                            viewModel.stopListening()
                         } else {
-                            permissionLauncher.launch(requiredPermissions())
+                            val permissions = missingPermissions()
+                            if (permissions.isEmpty()) viewModel.startListening()
+                            else permissionLauncher.launch(permissions)
                         }
                     }
                 )
@@ -160,8 +163,11 @@ private fun LiveNotesScreen(
                     latestTranscript = latestTranscript
                 )
             }
+            if (!transcriptionError.isNullOrBlank()) {
+                item { TranscriptionErrorCard(message = transcriptionError!!) }
+            }
             if (!lastSummaryError.isNullOrBlank()) {
-                item { SummaryErrorCard(message = lastSummaryError!!) }
+                item { SummaryErrorCard(message = lastSummaryError!!, onRetry = viewModel::retrySummary) }
             }
             item {
                 OnDeviceModelCard(
@@ -296,7 +302,17 @@ private fun LiveTranscriptCard(isListening: Boolean, latestTranscript: String) {
 }
 
 @Composable
-private fun SummaryErrorCard(message: String) {
+private fun TranscriptionErrorCard(message: String) {
+    Card(colors = CardDefaults.cardColors(containerColor = Color(0xFFFEE2E2))) {
+        Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            Text("Capture needs attention", fontWeight = FontWeight.SemiBold, color = Color(0xFF991B1B))
+            Text(message, color = Color(0xFF7F1D1D))
+        }
+    }
+}
+
+@Composable
+private fun SummaryErrorCard(message: String, onRetry: () -> Unit) {
     Card(
         colors = CardDefaults.cardColors(containerColor = Color(0xFFFEE2E2)),
         shape = RoundedCornerShape(20.dp),
@@ -306,9 +322,10 @@ private fun SummaryErrorCard(message: String) {
             Text("Note summarization stopped", fontWeight = FontWeight.SemiBold, color = Color(0xFF991B1B))
             Text(message, color = Color(0xFF7F1D1D))
             Text(
-                "Transcript is still being captured. Check your API key or connection, then keep talking to retry.",
+                "Saved transcripts are available. Check your API key or connection, then retry the summary.",
                 color = Color(0xFF991B1B)
             )
+            TextButton(onClick = onRetry) { Text("Retry summary") }
         }
     }
 }

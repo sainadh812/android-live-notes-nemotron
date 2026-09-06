@@ -50,11 +50,24 @@ interface TranscriptChunkDao {
     @Insert
     suspend fun insert(chunk: TranscriptChunkEntity)
 
-    @Query("SELECT * FROM transcript_chunks WHERE dateKey = :dateKey ORDER BY createdAtEpochMs DESC LIMIT :limit")
+    @Query("SELECT * FROM transcript_chunks WHERE dateKey = :dateKey ORDER BY createdAtEpochMs DESC, id DESC LIMIT :limit")
     suspend fun recent(dateKey: String, limit: Int): List<TranscriptChunkEntity>
 
-    @Query("SELECT * FROM transcript_chunks WHERE dateKey = :dateKey ORDER BY createdAtEpochMs DESC LIMIT 1")
+    @Query("SELECT * FROM transcript_chunks WHERE dateKey = :dateKey ORDER BY createdAtEpochMs DESC, id DESC LIMIT 1")
     suspend fun latest(dateKey: String): TranscriptChunkEntity?
+
+    // Include the timestamp boundary because callbacks can share a millisecond.
+    // Only the newest row may contribute a partial; all unsummarized finals survive.
+    @Query("""
+        SELECT * FROM transcript_chunks
+        WHERE dateKey = :dateKey AND createdAtEpochMs >= :sinceEpochMs
+        AND (isFinal = 1 OR id = (
+            SELECT id FROM transcript_chunks WHERE dateKey = :dateKey
+            ORDER BY createdAtEpochMs DESC, id DESC LIMIT 1
+        ))
+        ORDER BY createdAtEpochMs ASC, id ASC
+    """)
+    suspend fun forSummary(dateKey: String, sinceEpochMs: Long): List<TranscriptChunkEntity>
 }
 
 @Database(

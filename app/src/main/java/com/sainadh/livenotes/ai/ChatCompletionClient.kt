@@ -90,9 +90,9 @@ class ChatCompletionClient(
                                 You maintain live meeting notes for a mobile app.
                                 Return strictly valid JSON with this shape:
                                 {
-                                  \"summary\": \"short paragraph\",
-                                  \"runningContext\": \"compact cumulative context for the next call\",
-                                  \"actionItems\": [\"owner + task\"]
+                                  "summary": "short paragraph",
+                                  "runningContext": "compact cumulative context for the next call",
+                                  "actionItems": ["owner + task"]
                                 }
                                 Keep summaries concise and factual.
                             """.trimIndent()

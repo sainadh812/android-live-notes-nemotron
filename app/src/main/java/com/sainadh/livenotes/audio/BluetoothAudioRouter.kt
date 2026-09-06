@@ -1,11 +1,14 @@
 package com.sainadh.livenotes.audio
 
+import android.Manifest
 import android.content.Context
+import android.content.pm.PackageManager
 import android.media.AudioDeviceInfo
 import android.media.AudioManager
 import android.os.Build
+import androidx.core.content.ContextCompat
 
-class BluetoothAudioRouter(context: Context) {
+class BluetoothAudioRouter(private val context: Context) {
     private val audioManager = context.getSystemService(AudioManager::class.java)
 
     /**
@@ -21,6 +24,15 @@ class BluetoothAudioRouter(context: Context) {
      */
     fun activate(inputMode: AudioInputMode): String {
         return try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S &&
+                ContextCompat.checkSelfPermission(context, Manifest.permission.BLUETOOTH_CONNECT) != PackageManager.PERMISSION_GRANTED) {
+                activatePhoneMicrophone()
+                return if (inputMode == AudioInputMode.BLUETOOTH_MIC) {
+                    "Phone microphone (Bluetooth permission not granted)"
+                } else {
+                    "Phone microphone"
+                }
+            }
             when (inputMode) {
                 AudioInputMode.AUTO -> {
                     if (tryActivateBluetoothRoute()) {
@@ -44,6 +56,7 @@ class BluetoothAudioRouter(context: Context) {
                 }
             }
         } catch (e: SecurityException) {
+            runCatching { activatePhoneMicrophone() }
             "Phone microphone (audio routing permission denied: ${e.message})"
         }
     }

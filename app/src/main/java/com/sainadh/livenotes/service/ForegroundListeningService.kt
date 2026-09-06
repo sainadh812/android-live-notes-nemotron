@@ -18,22 +18,35 @@ import com.sainadh.livenotes.R
 import com.sainadh.livenotes.audio.BluetoothAudioRouter
 import com.sainadh.livenotes.stt.NemotronTranscriber
 import com.sainadh.livenotes.stt.SpeechTranscriber
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 object ServiceStateTracker {
     val listening = MutableStateFlow(false)
     val latestTranscript = MutableStateFlow("")
     val audioRoute = MutableStateFlow("Not listening")
-    val lastSummaryError = MutableStateFlow<String?>(null)
+    val lastTranscriptionError = MutableStateFlow<String?>(null)
 }
 
-class ForegroundListeningService : Service(), SpeechTranscriber.Listener {
-    private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+class ForegroundListeningService : Service() {
+    private enum class Phase { IDLE, LISTENING, STOPPING, DRAINING, DESTROYED }
+
+    // Callbacks and lifecycle changes run on main. Transcript work runs in callback
+    // order on IO, and shutdown waits until the final transcript has been saved.
+    private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
+    private var lastTranscriptJob: Job? = null
+    private var phase = Phase.IDLE
+    private var generation = 0
+    private var lastStartId = 0
+    private var restartRequested = false
+    private var notificationActive = false
     private var speechTranscriber: SpeechTranscriber? = null
     private var nemotronTranscriber: NemotronTranscriber? = null
     private var usingNemotron = false
@@ -44,132 +57,200 @@ class ForegroundListeningService : Service(), SpeechTranscriber.Listener {
         super.onCreate()
         createNotificationChannel()
         bluetoothAudioRouter = BluetoothAudioRouter(this)
-        // Transcriber selection now happens in startListening(), re-checked
-        // on every listen toggle - NOT here. Deciding once in onCreate()
-        // meant a model downloaded after the service was first created
-        // (which can be long-lived across many start/stop cycles) was
-        // silently never picked up; the app kept using SpeechTranscriber
-        // forever with no error shown.
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        lastStartId = startId
         when (intent?.action) {
             ACTION_STOP -> stopListeningAndSelf()
             else -> startListening()
         }
-        return START_STICKY
+        return if (intent?.action == ACTION_STOP) START_NOT_STICKY else START_STICKY
     }
 
     override fun onBind(intent: Intent?): IBinder? = null
 
-    /**
-     * Picks whichever quant is actually present on disk right now, falling
-     * back to SpeechTranscriber if none is downloaded OR the native libs
-     * failed to load (see NemotronTranscriber.isAvailable()). Re-evaluated
-     * on every call so a model downloaded mid-session, or a native-load
-     * failure, is reflected the next time listening starts - not just once
-     * for the lifetime of the service instance.
-     */
-    private fun resolveTranscriber() {
+    private fun resolveTranscriber(listener: SpeechTranscriber.Listener) {
         val app = application as LiveNotesApplication
         val downloadManager = app.appContainer.modelDownloadManager
         val availableQuant = downloadManager.findAnyDownloaded()
-        val wantNemotron = availableQuant != null && NemotronTranscriber.isAvailable()
-
-        if (wantNemotron == usingNemotron && (nemotronTranscriber != null || speechTranscriber != null)) {
-            return // already on the right transcriber, nothing to do
-        }
-
-        // Switching (or first-time setup): tear down whichever transcriber
-        // is currently active before building the new one.
-        nemotronTranscriber?.destroy()
-        nemotronTranscriber = null
-        speechTranscriber?.destroy()
-        speechTranscriber = null
-
-        usingNemotron = wantNemotron
+        usingNemotron = availableQuant != null && NemotronTranscriber.isAvailable()
         if (usingNemotron && availableQuant != null) {
             nemotronTranscriber = NemotronTranscriber(
                 context = this,
                 modelPath = downloadManager.modelFile(availableQuant).absolutePath,
                 language = "en-US",
-                listener = this
+                listener = listener
             )
         } else {
             if (availableQuant != null && !NemotronTranscriber.isAvailable()) {
-                ServiceStateTracker.lastSummaryError.value =
-                    "On-device model downloaded but native libs failed to load (${NemotronTranscriber.loadError()}) - using OS speech recognizer instead"
+                ServiceStateTracker.lastTranscriptionError.value =
+                    "On-device libraries could not load (${NemotronTranscriber.loadError()}). Using the OS speech recognizer."
             }
-            speechTranscriber = SpeechTranscriber(this, this)
+            speechTranscriber = SpeechTranscriber(this, listener)
         }
     }
 
     private fun startListening() {
-        startForeground(
-            NOTIFICATION_ID,
-            buildNotification(getString(R.string.notification_listening_title), "Preparing microphone")
-        )
-        ServiceStateTracker.lastSummaryError.value = null
-        resolveTranscriber() // may set lastSummaryError (native-load fallback) - must run AFTER the clear above
-        ServiceStateTracker.listening.value = true
-        val app = application as LiveNotesApplication
-        val selectedInputMode = app.appContainer.secureSettings.readAudioInputMode()
-        val resolvedRoute = bluetoothAudioRouter?.activate(selectedInputMode) ?: "Phone microphone"
-        ServiceStateTracker.audioRoute.value = resolvedRoute
-        acquireWakeLock()
-        if (usingNemotron) nemotronTranscriber?.start() else speechTranscriber?.start()
-        updateNotification(
-            "Using $resolvedRoute" + if (usingNemotron) " (on-device Nemotron)" else " (OS speech recognizer)"
-        )
+        when (phase) {
+            Phase.LISTENING, Phase.DESTROYED -> return
+            Phase.STOPPING, Phase.DRAINING -> {
+                restartRequested = true
+                return
+            }
+            Phase.IDLE -> Unit
+        }
+        phase = Phase.LISTENING
+        val sessionGeneration = ++generation
+        ServiceStateTracker.lastTranscriptionError.value = null
+        ServiceStateTracker.latestTranscript.value = ""
+        try {
+            startForeground(
+                NOTIFICATION_ID,
+                buildNotification(getString(R.string.notification_listening_title), "Preparing microphone")
+            )
+            notificationActive = true
+            resolveTranscriber(callbacks(sessionGeneration))
+            val app = application as LiveNotesApplication
+            val inputMode = app.appContainer.secureSettings.readAudioInputMode()
+            val route = bluetoothAudioRouter?.activate(inputMode) ?: "Phone microphone"
+            ServiceStateTracker.audioRoute.value = route
+            ServiceStateTracker.listening.value = true
+            acquireWakeLock()
+            updateNotification(
+                "Using $route" + if (usingNemotron) " (on-device Nemotron)" else " (OS speech recognizer)"
+            )
+            if (usingNemotron) nemotronTranscriber?.start() else speechTranscriber?.start()
+        } catch (error: RuntimeException) {
+            ServiceStateTracker.lastTranscriptionError.value = error.message ?: "Could not start microphone capture"
+            finishCapture(sessionGeneration)
+        }
+    }
+
+    private fun callbacks(sessionGeneration: Int) = object : SpeechTranscriber.Listener {
+        private fun acceptsCallbacks() = generation == sessionGeneration &&
+            (phase == Phase.LISTENING || phase == Phase.STOPPING)
+
+        override fun onTranscript(text: String, isFinal: Boolean) {
+            if (!acceptsCallbacks()) return
+            ServiceStateTracker.latestTranscript.value = text
+            val timestampMs = System.currentTimeMillis()
+            val previous = lastTranscriptJob
+            lastTranscriptJob = serviceScope.launch {
+                previous?.join()
+                try {
+                    val app = application as LiveNotesApplication
+                    val result = withContext(Dispatchers.IO) {
+                        app.appContainer.conversationOrchestrator.onTranscript(text, isFinal, timestampMs)
+                    }
+                    result.exceptionOrNull()?.let {
+                        ServiceStateTracker.lastTranscriptionError.value =
+                            "Could not save transcript: ${it.message ?: it.javaClass.simpleName}"
+                    }
+                } catch (cancelled: CancellationException) {
+                    throw cancelled
+                } catch (error: Exception) {
+                    ServiceStateTracker.lastTranscriptionError.value =
+                        "Could not save transcript: ${error.message ?: error.javaClass.simpleName}"
+                }
+            }
+            if (phase == Phase.LISTENING) updateNotification(text)
+        }
+
+        override fun onStateChanged(state: String) {
+            if (!acceptsCallbacks()) return
+            if (state == "stopped") {
+                finishCapture(sessionGeneration)
+            } else if (phase == Phase.LISTENING) {
+                if (state == "ready") ServiceStateTracker.lastTranscriptionError.value = null
+                updateNotification(state)
+            }
+        }
+
+        override fun onError(reason: String) {
+            if (!acceptsCallbacks()) return
+            ServiceStateTracker.lastTranscriptionError.value = reason
+            updateNotification(reason)
+        }
     }
 
     private fun stopListeningAndSelf() {
+        restartRequested = false
         ServiceStateTracker.listening.value = false
-        ServiceStateTracker.latestTranscript.value = ""
-        ServiceStateTracker.audioRoute.value = "Not listening"
-        if (usingNemotron) nemotronTranscriber?.stop() else speechTranscriber?.stop()
+        when (phase) {
+            Phase.IDLE -> {
+                removeNotification()
+                stopSelfResult(lastStartId)
+            }
+            Phase.LISTENING -> {
+                phase = Phase.STOPPING
+                updateNotification("Finishing transcription")
+                // Both transcribers emit their final result before a stopped callback.
+                // Do not destroy them or cancel pending writes until that arrives.
+                if (usingNemotron) nemotronTranscriber?.stop() else speechTranscriber?.stop()
+            }
+            else -> Unit
+        }
+    }
+
+    private fun finishCapture(sessionGeneration: Int) {
+        if (generation != sessionGeneration || phase == Phase.DRAINING || phase == Phase.DESTROYED) return
+        phase = Phase.DRAINING
+        ServiceStateTracker.listening.value = false
+        releaseAudioResources()
+        updateNotification("Saving transcript")
+        val finalWrite = lastTranscriptJob
+        serviceScope.launch {
+            finalWrite?.join()
+            if (generation != sessionGeneration || phase != Phase.DRAINING) return@launch
+            generation += 1
+            destroyTranscribers()
+            lastTranscriptJob = null
+            phase = Phase.IDLE
+            if (restartRequested) {
+                restartRequested = false
+                startListening()
+            } else {
+                removeNotification()
+                // Do not stop a newer start request that Android has queued but
+                // has not delivered to onStartCommand yet.
+                stopSelfResult(lastStartId)
+            }
+        }
+    }
+
+    private fun releaseAudioResources() {
         bluetoothAudioRouter?.release()
         wakeLock?.takeIf { it.isHeld }?.release()
-        stopForeground(STOP_FOREGROUND_REMOVE)
-        stopSelf()
+        wakeLock = null
+        ServiceStateTracker.audioRoute.value = "Not listening"
+    }
+
+    private fun destroyTranscribers() {
+        nemotronTranscriber?.destroy()
+        nemotronTranscriber = null
+        speechTranscriber?.destroy()
+        speechTranscriber = null
     }
 
     override fun onDestroy() {
-        if (usingNemotron) nemotronTranscriber?.destroy() else speechTranscriber?.destroy()
-        bluetoothAudioRouter?.release()
-        wakeLock?.takeIf { it.isHeld }?.release()
+        phase = Phase.DESTROYED
+        generation += 1
+        destroyTranscribers()
+        releaseAudioResources()
+        removeNotification()
         serviceScope.cancel()
         ServiceStateTracker.listening.value = false
-        ServiceStateTracker.audioRoute.value = "Not listening"
         super.onDestroy()
     }
 
-    override fun onTranscript(text: String, isFinal: Boolean) {
-        ServiceStateTracker.latestTranscript.value = text
-        serviceScope.launch {
-            val app = application as LiveNotesApplication
-            val result = app.appContainer.conversationOrchestrator.onTranscript(text, isFinal)
-            result.fold(
-                onSuccess = { ServiceStateTracker.lastSummaryError.value = null },
-                onFailure = { error ->
-                    val message = error.message ?: error.javaClass.simpleName
-                    ServiceStateTracker.lastSummaryError.value = message
-                    updateNotification("Summary error: $message")
-                }
-            )
-        }
-        updateNotification(text)
-    }
-
-    override fun onStateChanged(state: String) {
-        updateNotification(state)
-    }
-
-    override fun onError(reason: String) {
-        updateNotification(reason)
+    private fun removeNotification() {
+        notificationActive = false
+        stopForeground(STOP_FOREGROUND_REMOVE)
     }
 
     private fun updateNotification(content: String) {
+        if (!notificationActive || phase == Phase.IDLE || phase == Phase.DESTROYED) return
         val manager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
         manager.notify(NOTIFICATION_ID, buildNotification(getString(R.string.notification_listening_title), content))
     }
@@ -231,7 +312,7 @@ class ForegroundListeningService : Service(), SpeechTranscriber.Listener {
 
         fun stop(context: Context) {
             val intent = Intent(context, ForegroundListeningService::class.java).setAction(ACTION_STOP)
-            ContextCompat.startForegroundService(context, intent)
+            context.startService(intent)
         }
     }
 }

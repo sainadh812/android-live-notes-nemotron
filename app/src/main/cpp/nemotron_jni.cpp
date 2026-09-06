@@ -21,6 +21,8 @@
 #include <jni.h>
 #include <string>
 #include <memory>
+#include <cstdio>
+#include <new>
 #include <android/log.h>
 
 #include "transcribe.h"
@@ -58,6 +60,24 @@ jstring makeJString(JNIEnv * env, const char * s) {
     return env->NewStringUTF(s);
 }
 
+void throwJavaError(JNIEnv * env, const char * message,
+                    const char * type = "java/lang/IllegalStateException") {
+    LOGE("%s", message);
+    if (env->ExceptionCheck()) return;
+    jclass exceptionClass = env->FindClass(type);
+    if (exceptionClass != nullptr) {
+        env->ThrowNew(exceptionClass, message);
+        env->DeleteLocalRef(exceptionClass);
+    }
+}
+
+void throwNativeError(JNIEnv * env, const char * operation, transcribe_status status) {
+    char message[384];
+    std::snprintf(message, sizeof(message), "%s failed: %s (status=%d)",
+                  operation, transcribe_status_string(status), static_cast<int>(status));
+    throwJavaError(env, message);
+}
+
 } // namespace
 
 extern "C" {
@@ -71,7 +91,8 @@ extern "C" {
  * the model's docs; -1 == model default). Pass -1 from Kotlin unless you
  * want to tune it explicitly.
  *
- * Returns 0 on failure (check logcat tag NemotronJNI for the reason).
+ * Throws IllegalStateException on a native failure, including its operation
+ * and status. Kotlin must catch it on the owning transcription worker.
  */
 JNIEXPORT jlong JNICALL
 Java_com_sainadh_livenotes_stt_NemotronTranscriber_nativeInit(
@@ -79,9 +100,20 @@ Java_com_sainadh_livenotes_stt_NemotronTranscriber_nativeInit(
         jstring jModelPath, jstring jLanguage, jint attContextRight) {
 
     const char * modelPath = env->GetStringUTFChars(jModelPath, nullptr);
+    if (modelPath == nullptr) return 0; // JVM has already raised an exception.
     const char * language  = env->GetStringUTFChars(jLanguage, nullptr);
+    if (language == nullptr) {
+        env->ReleaseStringUTFChars(jModelPath, modelPath);
+        return 0;
+    }
 
-    auto * ns = new NativeSession();
+    auto * ns = new (std::nothrow) NativeSession();
+    if (ns == nullptr) {
+        env->ReleaseStringUTFChars(jModelPath, modelPath);
+        env->ReleaseStringUTFChars(jLanguage, language);
+        throwJavaError(env, "Unable to allocate native ASR session", "java/lang/OutOfMemoryError");
+        return 0;
+    }
 
     // 1. Load the model (CPU backend on-device; AUTO picks CPU when no
     //    Vulkan/CUDA device is registered, which is the default build
@@ -91,20 +123,20 @@ Java_com_sainadh_livenotes_stt_NemotronTranscriber_nativeInit(
 
     transcribe_status st = transcribe_model_load_file(modelPath, &load_params, &ns->model);
     if (st != TRANSCRIBE_OK || ns->model == nullptr) {
-        LOGE("transcribe_model_load_file failed: status=%d path=%s", (int) st, modelPath);
         env->ReleaseStringUTFChars(jModelPath, modelPath);
         env->ReleaseStringUTFChars(jLanguage, language);
         delete ns;
+        throwNativeError(env, "Loading Nemotron model", st);
         return 0;
     }
 
     // 2. Open a session against the loaded model.
     st = transcribe_session_init(ns->model, nullptr, &ns->session);
     if (st != TRANSCRIBE_OK || ns->session == nullptr) {
-        LOGE("transcribe_session_init failed: status=%d", (int) st);
         env->ReleaseStringUTFChars(jModelPath, modelPath);
         env->ReleaseStringUTFChars(jLanguage, language);
         delete ns;
+        throwNativeError(env, "Creating Nemotron session", st);
         return 0;
     }
 
@@ -134,8 +166,8 @@ Java_com_sainadh_livenotes_stt_NemotronTranscriber_nativeInit(
     env->ReleaseStringUTFChars(jLanguage, language);
 
     if (st != TRANSCRIBE_OK) {
-        LOGE("transcribe_stream_begin failed: status=%d", (int) st);
         delete ns;
+        throwNativeError(env, "Starting Nemotron stream", st);
         return 0;
     }
 
@@ -156,38 +188,50 @@ Java_com_sainadh_livenotes_stt_NemotronTranscriber_nativeFeedPcm(
 
     auto * ns = reinterpret_cast<NativeSession *>(handle);
     if (ns == nullptr || !ns->stream_active) {
-        return makeJString(env, "");
+        throwJavaError(env, "Cannot feed audio: Nemotron stream is not active");
+        return nullptr;
     }
 
     jsize n = env->GetArrayLength(pcm);
     if (n <= 0) {
-        return makeJString(env, "");
+        throwJavaError(env, "Cannot feed an empty audio chunk");
+        return nullptr;
     }
 
     jfloat * samples = env->GetFloatArrayElements(pcm, nullptr);
+    if (samples == nullptr) return nullptr; // Preserve the JVM allocation exception.
 
-    struct transcribe_stream_update update{};
+    struct transcribe_stream_update update;
+    transcribe_stream_update_init(&update);
     transcribe_status st = transcribe_stream_feed(ns->session, samples, (int) n, &update);
 
     env->ReleaseFloatArrayElements(pcm, samples, JNI_ABORT);
 
     if (st != TRANSCRIBE_OK) {
-        LOGE("transcribe_stream_feed failed: status=%d", (int) st);
-        return makeJString(env, "");
+        ns->stream_active = false;
+        throwNativeError(env, "Transcribing microphone audio", st);
+        return nullptr;
     }
 
     struct transcribe_stream_text text;
     transcribe_stream_text_init(&text);
     st = transcribe_stream_get_text(ns->session, &text);
     if (st != TRANSCRIBE_OK) {
-        return makeJString(env, "");
+        ns->stream_active = false;
+        throwNativeError(env, "Reading Nemotron transcript", st);
+        return nullptr;
     }
 
-    std::string combined;
-    combined += (text.committed_text ? text.committed_text : "");
-    combined += '\x01';
-    combined += (text.tentative_text ? text.tentative_text : "");
-    return env->NewStringUTF(combined.c_str());
+    try {
+        std::string combined;
+        combined += (text.committed_text ? text.committed_text : "");
+        combined += '\x01';
+        combined += (text.tentative_text ? text.tentative_text : "");
+        return env->NewStringUTF(combined.c_str());
+    } catch (const std::bad_alloc &) {
+        throwJavaError(env, "Unable to allocate transcript text", "java/lang/OutOfMemoryError");
+        return nullptr;
+    }
 }
 
 /*
@@ -205,13 +249,14 @@ Java_com_sainadh_livenotes_stt_NemotronTranscriber_nativeFinalizeStream(
         return makeJString(env, "");
     }
 
-    struct transcribe_stream_update update{};
+    struct transcribe_stream_update update;
+    transcribe_stream_update_init(&update);
     transcribe_status st = transcribe_stream_finalize(ns->session, &update);
     ns->stream_active = false;
 
     if (st != TRANSCRIBE_OK) {
-        LOGE("transcribe_stream_finalize failed: status=%d", (int) st);
-        return makeJString(env, "");
+        throwNativeError(env, "Finalizing Nemotron transcript", st);
+        return nullptr;
     }
 
     const char * full = transcribe_full_text(ns->session);
@@ -231,10 +276,12 @@ Java_com_sainadh_livenotes_stt_NemotronTranscriber_nativeRestartStream(
 
     auto * ns = reinterpret_cast<NativeSession *>(handle);
     if (ns == nullptr || ns->session == nullptr) {
+        throwJavaError(env, "Cannot restart: Nemotron session is unavailable");
         return JNI_FALSE;
     }
 
     const char * language = env->GetStringUTFChars(jLanguage, nullptr);
+    if (language == nullptr) return JNI_FALSE;
 
     struct transcribe_run_params run_params;
     transcribe_run_params_init(&run_params);
@@ -252,7 +299,8 @@ Java_com_sainadh_livenotes_stt_NemotronTranscriber_nativeRestartStream(
     env->ReleaseStringUTFChars(jLanguage, language);
 
     if (st != TRANSCRIBE_OK) {
-        LOGE("nativeRestartStream: transcribe_stream_begin failed: status=%d", (int) st);
+        ns->stream_active = false;
+        throwNativeError(env, "Restarting Nemotron stream", st);
         return JNI_FALSE;
     }
 

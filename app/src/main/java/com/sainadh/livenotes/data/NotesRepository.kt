@@ -1,6 +1,7 @@
 package com.sainadh.livenotes.data
 
 import java.time.LocalDate
+import java.time.Instant
 import java.time.ZoneId
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
@@ -56,6 +57,9 @@ class NotesRepository(
 
     suspend fun latestChunk(dateKey: String): TranscriptChunk? = transcriptChunkDao.latest(dateKey)?.toModel()
 
+    suspend fun transcriptForSummary(dateKey: String, sinceEpochMs: Long): List<TranscriptChunk> =
+        transcriptChunkDao.forSummary(dateKey, sinceEpochMs).map { it.toModel() }
+
     suspend fun upsertNote(note: DailyNote) {
         dailyNoteDao.upsert(
             DailyNoteEntity(
@@ -69,6 +73,9 @@ class NotesRepository(
     }
 
     fun todayKey(zoneId: ZoneId = ZoneId.systemDefault()): String = LocalDate.now(zoneId).toString()
+
+    fun dateKey(timestampMs: Long, zoneId: ZoneId = ZoneId.systemDefault()): String =
+        Instant.ofEpochMilli(timestampMs).atZone(zoneId).toLocalDate().toString()
 }
 
 private fun TranscriptChunkEntity.toModel(): TranscriptChunk = TranscriptChunk(

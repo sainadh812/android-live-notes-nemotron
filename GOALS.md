@@ -1,3 +1,15 @@
+# Current repair status — 2026-09-06
+
+The fixes in this checkout address a confirmed native ABI defect: both feed and finalize passed an update structure with zero `struct_size`. The shipped engine rejects that with error 14 before audio processing. Both call sites now initialize the structure, and the rebuilt JNI library has matching source/binary hashes checked by Gradle. A valid GGUF file alone could not resolve the old ABI defect.
+
+Native lifecycle operations now have one worker owner. Host regression tests cover cancellation during initialization, stopping during inference, cleanup, failure handling, and callback order. Service shutdown preserves final text, retains errors, and prevents stale notification updates. Phone microphone capture no longer depends on optional permission grants. Summary requests are coalesced and can be retried. The shared Gradle proxy configuration has been removed.
+
+The intended product goal remains live speech-to-text followed by AI summaries and action items. Build/test instructions are in README.md. Physical-device verification with a real model is still required to establish transcription performance and background behavior.
+
+The historical notes below describe earlier investigation and its assumptions. Claims that file corruption was established as the root cause, that every statically checkable cause was exhausted, or that the configured OpenAI model ID is inherently invalid are not verified conclusions for this checkout.
+
+---
+
 # Project Goal
 
 Build an Android app (LiveMeetingNotes / android-live-notes-nemotron) that

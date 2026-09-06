@@ -32,6 +32,8 @@ class MainViewModel(
 ) : AndroidViewModel(application) {
     private val _connectionStatus = MutableStateFlow("Save settings, then test the AI connection.")
     val connectionStatus: StateFlow<String> = _connectionStatus.asStateFlow()
+    val summaryError: StateFlow<String?> =
+        (application as LiveNotesApplication).appContainer.conversationOrchestrator.summaryError
 
     val todayNote: StateFlow<DailyNote?> = repository.observeToday().stateIn(
         scope = viewModelScope,
@@ -124,11 +126,20 @@ class MainViewModel(
     fun currentAudioInputMode(): AudioInputMode = apiKeyStore.readAudioInputMode()
 
     fun toggleListening() {
-        if (isListening.value) {
-            ForegroundListeningService.stop(getApplication())
+        if (ServiceStateTracker.listening.value) {
+            stopListening()
         } else {
-            ForegroundListeningService.start(getApplication())
+            startListening()
         }
+    }
+
+    fun startListening() = ForegroundListeningService.start(getApplication())
+
+    fun stopListening() = ForegroundListeningService.stop(getApplication())
+
+    fun retrySummary() {
+        val app = getApplication<LiveNotesApplication>()
+        app.appContainer.conversationOrchestrator.retrySummary()
     }
 
     /** Which quant (if any) is already fully downloaded on this device. */
@@ -139,7 +150,7 @@ class MainViewModel(
      * Safe to call again after a Failed state to retry/resume. Listening
      * must be restarted (stop then start) after a download completes for
      * ForegroundListeningService to pick up the newly-available model,
-     * since it decides which transcriber to use once, in onCreate.
+     * since the transcriber is selected at the start of each session.
      */
     fun downloadModel(quant: NemotronQuant) {
         viewModelScope.launch(Dispatchers.IO) {

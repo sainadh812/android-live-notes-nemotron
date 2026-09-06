@@ -13,7 +13,7 @@ import java.util.Locale
 class SpeechTranscriber(
     private val context: Context,
     private val listener: Listener
-) : RecognitionListener {
+) {
     interface Listener {
         fun onTranscript(text: String, isFinal: Boolean)
         fun onStateChanged(state: String)
@@ -23,124 +23,195 @@ class SpeechTranscriber(
     private val mainHandler = Handler(Looper.getMainLooper())
     private var recognizer: SpeechRecognizer? = null
     private var running = false
+    private var stopping = false
+    private var destroyed = false
+    private var sessionActive = false
+    private var generation = 0
     private var consecutiveRecoverableErrors = 0
+    private var lastHypothesis = ""
+    private var restartTask: Runnable? = null
+    private var stopTimeout: Runnable? = null
 
-    fun start() {
-        if (running) return
+    fun start() = onMain {
+        if (running || stopping || destroyed) return@onMain
         running = true
         consecutiveRecoverableErrors = 0
-        mainHandler.post {
-            if (!SpeechRecognizer.isRecognitionAvailable(context)) {
-                listener.onError("Speech recognition is not available on this device")
-                running = false
-                return@post
-            }
-            val speechRecognizer = recognizer ?: SpeechRecognizer.createSpeechRecognizer(context).also {
-                it.setRecognitionListener(this)
-                recognizer = it
-            }
-            listener.onStateChanged("listening")
-            speechRecognizer.startListening(buildIntent())
-        }
+        startSession()
     }
 
-    fun stop() {
+    /** Wait for the recognizer's final result before announcing that capture stopped. */
+    fun stop() = onMain {
+        if (destroyed || stopping) return@onMain
         running = false
-        consecutiveRecoverableErrors = 0
-        mainHandler.post {
+        stopping = true
+        cancelRestart()
+        if (!sessionActive) {
+            emitLastHypothesis()
+            finishStop()
+            return@onMain
+        }
+        // Some recognition providers never deliver a result after stopListening().
+        // Preserve their latest hypothesis and bound the wait in that case.
+        stopTimeout = Runnable {
+            emitLastHypothesis()
+            finishStop()
+        }.also { mainHandler.postDelayed(it, 5_000L) }
+        try {
             recognizer?.stopListening()
-            listener.onStateChanged("stopped")
+        } catch (_: RuntimeException) {
+            emitLastHypothesis()
+            finishStop()
         }
     }
 
-    fun destroy() {
+    fun destroy() = onMain {
+        destroyed = true
         running = false
-        consecutiveRecoverableErrors = 0
-        mainHandler.post {
-            recognizer?.cancel()
-            recognizer?.destroy()
-            recognizer = null
+        stopping = false
+        cancelRestart()
+        cancelStopTimeout()
+        disposeRecognizer()
+    }
+
+    private fun startSession() {
+        if (!running || destroyed) return
+        try {
+            if (!SpeechRecognizer.isRecognitionAvailable(context)) {
+                fail("Speech recognition is not available on this device")
+                return
+            }
+            disposeRecognizer()
+            lastHypothesis = ""
+            val sessionGeneration = generation
+            val currentRecognizer = SpeechRecognizer.createSpeechRecognizer(context)
+            recognizer = currentRecognizer
+            currentRecognizer.setRecognitionListener(callbacks(sessionGeneration))
+            sessionActive = true
+            listener.onStateChanged("listening")
+            currentRecognizer.startListening(buildIntent())
+        } catch (error: RuntimeException) {
+            fail(error.message ?: "Could not start speech recognition")
         }
     }
 
-    override fun onReadyForSpeech(params: Bundle?) {
-        consecutiveRecoverableErrors = 0
-        listener.onStateChanged("ready")
-    }
+    private fun callbacks(sessionGeneration: Int) = object : RecognitionListener {
+        private fun isCurrent() = !destroyed && generation == sessionGeneration
 
-    override fun onBeginningOfSpeech() = Unit
-    override fun onRmsChanged(rmsdB: Float) = Unit
-    override fun onBufferReceived(buffer: ByteArray?) = Unit
-
-    override fun onEndOfSpeech() {
-        listener.onStateChanged("processing")
-    }
-
-    override fun onError(error: Int) {
-        val message = describeError(error)
-        listener.onError(message)
-
-        when (error) {
-            SpeechRecognizer.ERROR_LANGUAGE_NOT_SUPPORTED,
-            SpeechRecognizer.ERROR_LANGUAGE_UNAVAILABLE,
-            SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS -> {
-                running = false
-                listener.onStateChanged("stopped")
+        override fun onReadyForSpeech(params: Bundle?) {
+            if (isCurrent()) listener.onStateChanged("ready")
+        }
+        override fun onBeginningOfSpeech() = Unit
+        override fun onRmsChanged(rmsdB: Float) = Unit
+        override fun onBufferReceived(buffer: ByteArray?) = Unit
+        override fun onEndOfSpeech() {
+            if (isCurrent()) listener.onStateChanged("processing")
+        }
+        override fun onError(error: Int) {
+            if (!isCurrent()) return
+            sessionActive = false
+            if (stopping) {
+                emitLastHypothesis()
+                finishStop()
+                return
             }
+            if (!running) return
+            when (error) {
+                SpeechRecognizer.ERROR_LANGUAGE_NOT_SUPPORTED,
+                SpeechRecognizer.ERROR_LANGUAGE_UNAVAILABLE,
+                SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS -> fail(describeError(error))
 
-            SpeechRecognizer.ERROR_NO_MATCH,
-            SpeechRecognizer.ERROR_SPEECH_TIMEOUT -> {
-                consecutiveRecoverableErrors = 0
-                if (running) restartSoon(1200L)
-            }
-
-            else -> {
-                consecutiveRecoverableErrors += 1
-                if (!running) return
-                if (consecutiveRecoverableErrors >= 3) {
-                    running = false
-                    listener.onError("Stopped retrying after repeated recognizer failures. ${message.removePrefix("SpeechRecognizer error: ")}")
-                    listener.onStateChanged("stopped")
-                    return
+                SpeechRecognizer.ERROR_NO_MATCH,
+                SpeechRecognizer.ERROR_SPEECH_TIMEOUT -> {
+                    consecutiveRecoverableErrors = 0
+                    listener.onStateChanged("Waiting for speech")
+                    restartSoon(1_200L)
                 }
-                val delayMs = (1500L * consecutiveRecoverableErrors).coerceAtMost(5000L)
-                restartSoon(delayMs)
+
+                else -> {
+                    consecutiveRecoverableErrors += 1
+                    if (consecutiveRecoverableErrors >= 3) {
+                        fail("Stopped retrying after repeated recognizer failures. ${describeError(error)}")
+                    } else {
+                        listener.onError(describeError(error))
+                        restartSoon((1_500L * consecutiveRecoverableErrors).coerceAtMost(5_000L))
+                    }
+                }
             }
         }
-    }
-
-    override fun onResults(results: Bundle?) {
-        consecutiveRecoverableErrors = 0
-        emitMatches(results, isFinal = true)
-        if (running) restartSoon(700L)
-    }
-
-    override fun onPartialResults(partialResults: Bundle?) {
-        emitMatches(partialResults, isFinal = false)
-    }
-
-    override fun onEvent(eventType: Int, params: Bundle?) = Unit
-
-    private fun emitMatches(bundle: Bundle?, isFinal: Boolean) {
-        val values = bundle?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION).orEmpty()
-        val text = values.firstOrNull().orEmpty().trim()
-        if (text.isNotBlank()) {
-            listener.onTranscript(text, isFinal)
+        override fun onResults(results: Bundle?) {
+            if (!isCurrent()) return
+            sessionActive = false
+            consecutiveRecoverableErrors = 0
+            val text = match(results).ifBlank { lastHypothesis }
+            if (text.isNotBlank()) listener.onTranscript(text, isFinal = true)
+            lastHypothesis = ""
+            if (stopping) finishStop() else if (running) restartSoon(700L)
         }
+        override fun onPartialResults(partialResults: Bundle?) {
+            if (!isCurrent() || (!running && !stopping)) return
+            val text = match(partialResults)
+            if (text.isNotBlank()) {
+                lastHypothesis = text
+                listener.onTranscript(text, isFinal = false)
+            }
+        }
+        override fun onEvent(eventType: Int, params: Bundle?) = Unit
     }
+
+    private fun fail(reason: String) {
+        listener.onError(reason)
+        emitLastHypothesis()
+        finishStop()
+    }
+
+    private fun finishStop() {
+        running = false
+        stopping = false
+        cancelRestart()
+        cancelStopTimeout()
+        disposeRecognizer()
+        listener.onStateChanged("stopped")
+    }
+
+    private fun emitLastHypothesis() {
+        if (lastHypothesis.isNotBlank()) listener.onTranscript(lastHypothesis, isFinal = true)
+        lastHypothesis = ""
+    }
+
+    private fun disposeRecognizer() {
+        // Invalidate callbacks before cancel/destroy, which may trigger provider callbacks.
+        generation += 1
+        sessionActive = false
+        val previous = recognizer
+        recognizer = null
+        runCatching { previous?.cancel() }
+        runCatching { previous?.destroy() }
+    }
+
+    private fun match(bundle: Bundle?): String =
+        bundle?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
+            ?.firstOrNull().orEmpty().trim()
 
     private fun restartSoon(delayMs: Long) {
-        mainHandler.postDelayed({
-            if (running) {
-                recognizer?.cancel()
-                recognizer?.destroy()
-                val freshRecognizer = SpeechRecognizer.createSpeechRecognizer(context).also {
-                    it.setRecognitionListener(this)
-                }
-                recognizer = freshRecognizer
-                freshRecognizer.startListening(buildIntent())
-            }
-        }, delayMs)
+        cancelRestart()
+        restartTask = Runnable {
+            restartTask = null
+            startSession()
+        }.also { mainHandler.postDelayed(it, delayMs) }
+    }
+
+    private fun cancelRestart() {
+        restartTask?.let(mainHandler::removeCallbacks)
+        restartTask = null
+    }
+
+    private fun cancelStopTimeout() {
+        stopTimeout?.let(mainHandler::removeCallbacks)
+        stopTimeout = null
+    }
+
+    private inline fun onMain(crossinline action: () -> Unit) {
+        if (Looper.myLooper() == Looper.getMainLooper()) action() else mainHandler.post { action() }
     }
 
     private fun buildIntent(): Intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
