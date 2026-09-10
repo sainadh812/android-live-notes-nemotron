@@ -6,11 +6,13 @@ import android.media.AudioRecord
 import android.media.MediaRecorder
 import android.os.Handler
 import android.os.Looper
+import com.sainadh.livenotes.audio.WavFileWriter
 import java.io.File
 import java.util.concurrent.ArrayBlockingQueue
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
+import kotlin.math.sqrt
 
 /**
  * On-device streaming ASR using transcribe.cpp with NVIDIA Nemotron
@@ -46,7 +48,8 @@ class NemotronTranscriber(
     private val modelPath: String,
     private val language: String = "en-US",
     private val attContextRight: Int = -1,
-    private val listener: SpeechTranscriber.Listener
+    private val listener: SpeechTranscriber.Listener,
+    private val audioFile: File? = null
 ) {
     companion object {
         // Tracks whether the native libs loaded successfully. A failure
@@ -89,6 +92,7 @@ class NemotronTranscriber(
     private external fun nativeInit(modelPath: String, language: String, attContextRight: Int): Long
     private external fun nativeFeedPcm(handle: Long, pcm: FloatArray): String
     private external fun nativeFinalizeStream(handle: Long): String
+    private external fun nativeWordTimings(handle: Long): String
     private external fun nativeRestartStream(handle: Long, language: String, attContextRight: Int): Boolean
     private external fun nativeWasTruncated(handle: Long): Boolean
     private external fun nativeDestroy(handle: Long)
@@ -123,7 +127,7 @@ class NemotronTranscriber(
         fun enqueue(pcm: FloatArray) {
             check(chunks.offer(pcm)) {
                 "Transcription could not keep up with the microphone (10 seconds of queued audio). " +
-                    "Recording stopped; some recent audio could not be saved. Try a smaller model."
+                    "Transcription stopped; some recent audio could not be transcribed. Try a smaller model."
             }
         }
     }
@@ -212,6 +216,7 @@ class NemotronTranscriber(
         var failure: String? = null
         var finalUpdate: TranscriptUpdate? = null
         val segments = NativeTranscriptSegments()
+        val sampleClock = TranscriptSampleClock(sampleRateHz)
         try {
             if (!wantsCapture(session)) return
             check(nativeLibsLoaded) {
@@ -239,7 +244,8 @@ class NemotronTranscriber(
                 if (isDestroyed()) break
                 val pcm = capture.chunks.poll(20, TimeUnit.MILLISECONDS) ?: continue
                 val result = nativeFeedPcm(handle, pcm)
-                segments.update(result).forEach { update -> postTranscript(session, update) }
+                sampleClock.consume(pcm.size)
+                segments.update(result).forEach { update -> postTranscript(session, sampleClock.stamp(update)) }
                 checkOutputLimit()
             }
         } catch (error: Throwable) {
@@ -254,15 +260,19 @@ class NemotronTranscriber(
             if (streamOpened && failure == null && !isDestroyed()) {
                 try {
                     // Capture errors still preserve all audio accepted before the error.
-                    finalUpdate = segments.finish(nativeFinalizeStream(handle))
+                    finalUpdate = sampleClock.stamp(segments.finish(nativeFinalizeStream(handle)))
                     checkOutputLimit()
+                    audioFile?.takeIf { it.isFile }?.let { savedAudio ->
+                        // Timing is optional. Failure cannot discard a valid recording or transcript.
+                        runCatching { NativeWordTimingFile.write(savedAudio, nativeWordTimings(handle)) }
+                    }
                 } catch (error: Throwable) {
                     failure = describeFailure(error)
                 }
             }
             failure = failure ?: capture.failure
             if (streamOpened && failure != null && finalUpdate == null) {
-                finalUpdate = segments.interrupted()
+                finalUpdate = sampleClock.stamp(segments.interrupted())
             }
             if (failure != null || isDestroyed()) {
                 val cleanupFailure = releaseHandle()
@@ -274,14 +284,38 @@ class NemotronTranscriber(
 
     private fun runCapture(session: Long, capture: Capture) {
         var record: AudioRecord? = null
+        var wav: WavFileWriter? = null
         val pcm16 = ShortArray(chunkFrames)
         var bufferedFrames = 0
+        var recordedFrames = 0L
+        var lastProgressFrames = 0L
+        var levelEnergy = 0.0
+        var levelFrames = 0L
+        fun progress(force: Boolean = false) {
+            if (!force && recordedFrames - lastProgressFrames < sampleRateHz / 10) return
+            val duration = recordedFrames * 1_000L / sampleRateHz
+            val level = if (levelFrames > 0) sqrt(levelEnergy / levelFrames).toFloat().coerceIn(0f, 1f) else 0f
+            lastProgressFrames = recordedFrames
+            levelEnergy = 0.0
+            levelFrames = 0L
+            postSession(session) { listener.onAudioProgress(duration, level) }
+        }
         fun read(mic: AudioRecord, maxFrames: Int = chunkFrames): Int {
             val n = mic.read(
                 pcm16, bufferedFrames, minOf(chunkFrames - bufferedFrames, maxFrames),
                 AudioRecord.READ_NON_BLOCKING
             )
             check(n >= 0) { "Microphone read failed ($n)" }
+            // Save each read before queueing inference, including partial chunks
+            // and audio the model cannot process quickly enough.
+            wav?.write(pcm16, bufferedFrames, n)
+            for (index in bufferedFrames until bufferedFrames + n) {
+                val sample = pcm16[index] / 32768.0
+                levelEnergy += sample * sample
+            }
+            recordedFrames += n
+            levelFrames += n
+            progress()
             bufferedFrames += n
             if (bufferedFrames == chunkFrames) {
                 capture.enqueue(toFloatPcm(pcm16, bufferedFrames))
@@ -306,6 +340,7 @@ class NemotronTranscriber(
             }
             record = mic
             check(mic.state == AudioRecord.STATE_INITIALIZED) { "AudioRecord failed to initialize" }
+            audioFile?.let { wav = WavFileWriter(it, sampleRateHz) }
             synchronized(stateLock) {
                 if (!wantsCapture(session)) return
                 mic.startRecording()
@@ -360,6 +395,17 @@ class NemotronTranscriber(
                     capture.enqueue(toFloatPcm(pcm16, bufferedFrames))
                 } catch (error: Throwable) {
                     capture.failure = capture.failure ?: describeFailure(error)
+                }
+            }
+            progress(force = true)
+            wav?.let { writer ->
+                try {
+                    writer.finish()?.let { saved ->
+                        val duration = writer.durationMs
+                        postSession(session) { listener.onAudioSaved(saved.name, duration) }
+                    }
+                } catch (error: Throwable) {
+                    capture.failure = capture.failure ?: "Could not save recording: ${describeFailure(error)}"
                 }
             }
             synchronized(stateLock) {

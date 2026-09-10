@@ -51,8 +51,55 @@ data class TranscriptSegmentEntity(
     val createdAtEpochMs: Long,
     val updatedAtEpochMs: Long,
     val revision: Long,
-    val summarizedRevision: Long
+    val summarizedRevision: Long,
+    val startMs: Long? = null,
+    val endMs: Long? = null
 )
+
+object RecordingAudioStatus {
+    const val RECORDING = "RECORDING"
+    const val READY = "READY"
+    const val UNAVAILABLE = "UNAVAILABLE"
+}
+
+/** Audio-only recordings are kept even if speech recognition produces no text. */
+@Entity(tableName = "recordings", indices = [Index("dateKey")])
+data class RecordingEntity(
+    @PrimaryKey val recordingId: String,
+    val dateKey: String,
+    val title: String,
+    val startedAtEpochMs: Long,
+    val durationMs: Long,
+    // A basename inside app-private storage, never an absolute path.
+    val audioFileName: String?,
+    val audioStatus: String,
+    val updatedAtEpochMs: Long
+)
+
+@Dao
+interface RecordingDao {
+    @Query("SELECT * FROM recordings ORDER BY startedAtEpochMs DESC, recordingId ASC")
+    fun observeAll(): Flow<List<RecordingEntity>>
+
+    @Query("SELECT * FROM recordings WHERE recordingId = :recordingId")
+    suspend fun get(recordingId: String): RecordingEntity?
+
+    @Query("SELECT * FROM recordings WHERE audioStatus = 'RECORDING' ORDER BY startedAtEpochMs ASC")
+    suspend fun unfinished(): List<RecordingEntity>
+
+    @Insert(onConflict = OnConflictStrategy.IGNORE)
+    suspend fun insert(recording: RecordingEntity)
+
+    @Query("""
+        UPDATE recordings SET audioFileName = :audioFileName,
+            durationMs = MAX(durationMs, :durationMs), audioStatus = :audioStatus,
+            updatedAtEpochMs = :timestampMs WHERE recordingId = :recordingId
+    """)
+    suspend fun finish(recordingId: String, audioFileName: String?, durationMs: Long, audioStatus: String, timestampMs: Long)
+
+    @Query("UPDATE recordings SET title = :title, updatedAtEpochMs = :timestampMs WHERE recordingId = :recordingId")
+    suspend fun updateTitle(recordingId: String, title: String, timestampMs: Long)
+}
 
 @Dao
 interface TranscriptSegmentDao {
@@ -74,15 +121,22 @@ interface TranscriptSegmentDao {
         if (existing == null) {
             if (update.text.isNotEmpty()) insert(TranscriptSegmentEntity(
                 recordingId, update.segmentId, dateKey, update.text, update.status.name,
-                update.appendToPrevious, timestampMs, timestampMs, 1L, 0L
+                update.appendToPrevious, timestampMs, timestampMs, 1L, 0L,
+                update.startMs?.takeIf { it >= 0 }, update.endMs?.takeIf { it >= 0 }
             ))
-        } else if (existing.status == TranscriptStatus.PARTIAL.name &&
-            (existing.text != update.text || existing.status != update.status.name)) {
+        } else if (existing.status == TranscriptStatus.PARTIAL.name) {
             // Final and interrupted segments cannot be rewritten by stale partials.
-            this.update(existing.copy(
-                text = update.text, status = update.status.name,
-                updatedAtEpochMs = timestampMs, revision = existing.revision + 1L
-            ))
+            val changedText = existing.text != update.text || existing.status != update.status.name
+            val startMs = existing.startMs ?: update.startMs?.takeIf { it >= 0 }
+            val endMs = update.endMs?.takeIf { it >= 0 } ?: existing.endMs
+            if (changedText || startMs != existing.startMs || endMs != existing.endMs) {
+                this.update(existing.copy(
+                    text = update.text, status = update.status.name,
+                    updatedAtEpochMs = timestampMs,
+                    revision = existing.revision + if (changedText) 1L else 0L,
+                    startMs = startMs, endMs = endMs
+                ))
+            }
         }
         // A segment revised after midnight still belongs to the day it started.
         return existing?.dateKey ?: dateKey
@@ -149,14 +203,15 @@ interface TranscriptChunkDao {
 }
 
 @Database(
-    entities = [DailyNoteEntity::class, TranscriptChunkEntity::class, TranscriptSegmentEntity::class],
-    version = 2,
+    entities = [DailyNoteEntity::class, TranscriptChunkEntity::class, TranscriptSegmentEntity::class, RecordingEntity::class],
+    version = 3,
     exportSchema = false
 )
 abstract class NotesDatabase : RoomDatabase() {
     abstract fun dailyNoteDao(): DailyNoteDao
     abstract fun transcriptChunkDao(): TranscriptChunkDao
     abstract fun transcriptSegmentDao(): TranscriptSegmentDao
+    abstract fun recordingDao(): RecordingDao
 
     companion object {
         val MIGRATION_1_2 = object : Migration(1, 2) {
@@ -177,12 +232,29 @@ abstract class NotesDatabase : RoomDatabase() {
             }
         }
 
+        val MIGRATION_2_3 = object : Migration(2, 3) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE transcript_segments ADD COLUMN startMs INTEGER")
+                db.execSQL("ALTER TABLE transcript_segments ADD COLUMN endMs INTEGER")
+                db.execSQL("""
+                    CREATE TABLE IF NOT EXISTS recordings (
+                        recordingId TEXT NOT NULL PRIMARY KEY, dateKey TEXT NOT NULL,
+                        title TEXT NOT NULL, startedAtEpochMs INTEGER NOT NULL,
+                        durationMs INTEGER NOT NULL, audioFileName TEXT,
+                        audioStatus TEXT NOT NULL, updatedAtEpochMs INTEGER NOT NULL
+                    )
+                """.trimIndent())
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_recordings_dateKey ON recordings (dateKey)")
+                // Existing transcript tables retain every row; old text has no invented audio/timing.
+            }
+        }
+
         fun build(context: Context): NotesDatabase {
             return Room.databaseBuilder(
                 context,
                 NotesDatabase::class.java,
                 "live-notes.db"
-            ).addMigrations(MIGRATION_1_2).build()
+            ).addMigrations(MIGRATION_1_2, MIGRATION_2_3).build()
         }
     }
 }

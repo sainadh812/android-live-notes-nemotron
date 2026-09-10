@@ -131,6 +131,34 @@ bool transcribe_model_accepts_ext_kind(const transcribe_model *, transcribe_ext_
         (modelFamily == "moonshine_streaming" && kind == TRANSCRIBE_EXT_KIND_MOONSHINE_STREAMING_STREAM);
 }
 bool transcribe_was_truncated(const transcribe_session *) { return wasTruncated; }
+transcribe_timestamp_kind transcribe_returned_timestamp_kind(const transcribe_session *) {
+    return modelFamily == "parakeet" ? TRANSCRIBE_TIMESTAMPS_TOKEN : TRANSCRIBE_TIMESTAMPS_NONE;
+}
+bool tokenOnlyTiming = false;
+int transcribe_n_words(const transcribe_session *) { return tokenOnlyTiming ? 0 : 1; }
+int transcribe_n_tokens(const transcribe_session *) { return 2; }
+void transcribe_token_init(transcribe_token * token) {
+    std::memset(token, 0, sizeof(*token));
+    token->struct_size = sizeof(*token);
+}
+transcribe_status transcribe_get_token(const transcribe_session *, int index, transcribe_token * token) {
+    assert(index < 2 && token->struct_size == sizeof(*token));
+    token->text = index == 0 ? " Hello" : u8" 🌍";
+    token->t0_ms = index == 0 ? 250 : 600;
+    token->t1_ms = index == 0 ? 500 : 600;
+    return TRANSCRIBE_OK;
+}
+void transcribe_word_init(transcribe_word * word) {
+    std::memset(word, 0, sizeof(*word));
+    word->struct_size = sizeof(*word);
+}
+transcribe_status transcribe_get_word(const transcribe_session *, int index, transcribe_word * word) {
+    assert(index == 0 && word->struct_size == sizeof(*word));
+    word->text = u8"Hello 🌍";
+    word->t0_ms = 250;
+    word->t1_ms = 500;
+    return TRANSCRIBE_OK;
+}
 void transcribe_stream_update_init(transcribe_stream_update * update) {
     std::memset(update, 0, sizeof(*update));
     update->struct_size = sizeof(*update);
@@ -285,6 +313,14 @@ int main() {
         auto stableFinal = finalize(&env, nullptr, alternative);
         assert(javaString(stableFinal) == "Hello world.");
         deleteString(stableFinal);
+        auto timing = Java_com_sainadh_livenotes_stt_NemotronTranscriber_nativeWordTimings(&env, nullptr, alternative);
+        assert(javaString(timing) == (modelFamily == "parakeet" ? "250\t500\t48656c6c6f20f09f8c8d\n" : ""));
+        deleteString(timing);
+        tokenOnlyTiming = true;
+        timing = Java_com_sainadh_livenotes_stt_NemotronTranscriber_nativeWordTimings(&env, nullptr, alternative);
+        assert(javaString(timing) == (modelFamily == "parakeet" ? "250\t500\t48656c6c6f\n600\t600\tf09f8c8d\n" : ""));
+        deleteString(timing);
+        tokenOnlyTiming = false;
         assert(restart(&env, nullptr, alternative, locale, -1) == JNI_TRUE);
         assert(Java_com_sainadh_livenotes_stt_NemotronTranscriber_nativeWasTruncated(&env, nullptr, alternative) == JNI_FALSE);
         destroy(&env, nullptr, alternative);

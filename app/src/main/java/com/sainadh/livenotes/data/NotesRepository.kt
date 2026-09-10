@@ -37,6 +37,7 @@ class NotesRepository(
     private val dailyNoteDao = database.dailyNoteDao()
     private val transcriptChunkDao = database.transcriptChunkDao()
     private val segmentDao = database.transcriptSegmentDao()
+    private val recordingDao = database.recordingDao()
     fun observeToday(): Flow<DailyNote?> = dailyNoteDao.observeOne(todayKey()).map { it?.toModel(json) }
 
     fun observeAll(): Flow<List<DailyNote>> = dailyNoteDao.observeAll().map { list ->
@@ -44,8 +45,39 @@ class NotesRepository(
     }
 
     fun observeSavedRecordings(): Flow<List<SavedRecording>> = combine(
-        segmentDao.observeAll(), transcriptChunkDao.observeAll()
-    ) { segments, legacy -> savedRecordings(segments, legacy) }.flowOn(Dispatchers.Default)
+        segmentDao.observeAll(), transcriptChunkDao.observeAll(), recordingDao.observeAll()
+    ) { segments, legacy, recordings -> savedRecordings(segments, legacy, recordings) }.flowOn(Dispatchers.Default)
+
+    suspend fun beginRecording(recordingId: String, timestampMs: Long) {
+        recordingDao.insert(RecordingEntity(
+            recordingId = recordingId,
+            dateKey = dateKey(timestampMs),
+            title = "Recording",
+            startedAtEpochMs = timestampMs,
+            durationMs = 0L,
+            audioFileName = null,
+            audioStatus = RecordingAudioStatus.RECORDING,
+            updatedAtEpochMs = timestampMs
+        ))
+    }
+
+    suspend fun finishRecording(recordingId: String, audioFileName: String?, durationMs: Long) {
+        require(audioFileName == null || (audioFileName.isNotBlank() &&
+            audioFileName != "." && audioFileName != ".." &&
+            '/' !in audioFileName && '\\' !in audioFileName)) { "Audio filename must be a relative basename" }
+        recordingDao.finish(recordingId, audioFileName, durationMs.coerceAtLeast(0L),
+            if (audioFileName == null) RecordingAudioStatus.UNAVAILABLE else RecordingAudioStatus.READY,
+            System.currentTimeMillis())
+    }
+
+    suspend fun updateRecordingTitle(recordingId: String, title: String) {
+        val cleanTitle = title.trim().take(120)
+        require(cleanTitle.isNotEmpty()) { "Recording title cannot be blank" }
+        recordingDao.updateTitle(recordingId, cleanTitle, System.currentTimeMillis())
+    }
+
+    /** Call recovery before capture starts so an active recorder's file is never finalized here. */
+    suspend fun unfinishedRecordings(): List<RecordingEntity> = recordingDao.unfinished()
 
     suspend fun getNote(dateKey: String): DailyNote? = dailyNoteDao.getOne(dateKey)?.toModel(json)
 

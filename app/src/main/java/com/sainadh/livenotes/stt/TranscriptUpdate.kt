@@ -10,5 +10,9 @@ data class TranscriptUpdate(
     // Committed native pieces are stable, but do not each warrant an AI request.
     val endsUtterance: Boolean = status != TranscriptStatus.PARTIAL,
     // Native pieces preserve the model's exact spacing; OS utterances are separate.
-    val appendToPrevious: Boolean = false
+    val appendToPrevious: Boolean = false,
+    // Offsets in the saved recording, measured from captured audio when available.
+    // These are segment bounds, not exact per-word alignment.
+    val startMs: Long? = null,
+    val endMs: Long? = null
 )

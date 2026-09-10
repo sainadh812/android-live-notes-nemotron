@@ -8,6 +8,8 @@ import androidx.lifecycle.viewModelScope
 import com.sainadh.livenotes.ai.LlmConnectionRequest
 import com.sainadh.livenotes.ai.LlmProvider
 import com.sainadh.livenotes.audio.AudioInputMode
+import com.sainadh.livenotes.audio.RecordingPlayer
+import com.sainadh.livenotes.data.SavedRecording
 import com.sainadh.livenotes.data.ApiKeyStore
 import com.sainadh.livenotes.data.DailyNote
 import com.sainadh.livenotes.data.NotesRepository
@@ -24,6 +26,11 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.flowOn
+import com.sainadh.livenotes.data.alignedWordCues
+import com.sainadh.livenotes.audio.recordingAudioFile
+import com.sainadh.livenotes.stt.NativeWordTimingFile
 import kotlinx.coroutines.launch
 
 class MainViewModel(
@@ -32,6 +39,35 @@ class MainViewModel(
     private val apiKeyStore: ApiKeyStore,
     private val modelDownloadManager: ModelDownloadManager
 ) : AndroidViewModel(application) {
+    private val recordingPlayer = RecordingPlayer(application, viewModelScope)
+    val playback = recordingPlayer.state
+
+    init {
+        viewModelScope.launch {
+            ServiceStateTracker.capturePhase.collect { phase ->
+                if (phase != CapturePhase.IDLE) recordingPlayer.pause()
+            }
+        }
+    }
+
+    fun playRecording(recording: SavedRecording, positionMs: Long = 0L) {
+        if (ServiceStateTracker.capturePhase.value == CapturePhase.IDLE) recordingPlayer.play(recording, positionMs)
+    }
+    fun togglePlayback() {
+        if (ServiceStateTracker.capturePhase.value != CapturePhase.IDLE) return
+        val state = playback.value
+        val retry = savedRecordings.value.firstOrNull { it.recordingId == state.recordingId }
+        if (state.error != null && retry != null) recordingPlayer.play(retry, state.positionMs)
+        else recordingPlayer.toggle()
+    }
+    fun seekPlayback(positionMs: Long) = recordingPlayer.seek(positionMs)
+    fun setPlaybackSpeed(speed: Float) = recordingPlayer.setSpeed(speed)
+    fun pausePlayback() = recordingPlayer.pause()
+    override fun onCleared() {
+        recordingPlayer.close()
+        super.onCleared()
+    }
+
     private val _connectionStatus = MutableStateFlow("Save settings, then test the AI connection.")
     val connectionStatus: StateFlow<String> = _connectionStatus.asStateFlow()
     val summaryError: StateFlow<String?> =
@@ -43,7 +79,17 @@ class MainViewModel(
         initialValue = null
     )
 
-    val savedRecordings = repository.observeSavedRecordings().stateIn(
+    val savedRecordings = repository.observeSavedRecordings().map { recordings ->
+        recordings.map { recording ->
+            if (recording.audioFileName == null) recording else {
+                val cues = runCatching {
+                    val audio = recordingAudioFile(application, recording.audioFileName)
+                    alignedWordCues(recording.text, NativeWordTimingFile.read(audio), recording.durationMs)
+                }.getOrDefault(emptyList())
+                recording.copy(nativeWordCues = cues)
+            }
+        }
+    }.flowOn(Dispatchers.IO).stateIn(
         scope = viewModelScope,
         started = SharingStarted.WhileSubscribed(5_000),
         initialValue = emptyList()
@@ -154,7 +200,10 @@ class MainViewModel(
         }
     }
 
-    fun startListening() = ForegroundListeningService.start(getApplication())
+    fun startListening() {
+        recordingPlayer.pause()
+        ForegroundListeningService.start(getApplication())
+    }
 
     fun stopListening() = ForegroundListeningService.stop(getApplication())
 

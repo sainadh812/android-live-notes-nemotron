@@ -4,6 +4,9 @@ class SpeechTranscriber {
     interface Listener {
         fun onStateChanged(state: String)
         fun onError(reason: String)
+        fun onAudioProgress(durationMs: Long, level: Float) {}
+        fun onAudioSaved(fileName: String, durationMs: Long) {}
+        fun onAudioUnavailable(reason: String) {}
         fun onTranscript(text: String, isFinal: Boolean)
         fun onTranscriptUpdate(update: TranscriptUpdate) {
             onTranscript(update.text, update.status == TranscriptStatus.FINAL)

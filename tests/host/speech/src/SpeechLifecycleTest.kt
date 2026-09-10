@@ -5,6 +5,8 @@ import android.speech.SpeechRecognizer
 import com.sainadh.livenotes.stt.SpeechTranscriber
 import com.sainadh.livenotes.stt.TranscriptStatus
 import com.sainadh.livenotes.stt.TranscriptUpdate
+import java.io.File
+import java.nio.file.Files
 
 fun main() {
     var passed = 0
@@ -224,6 +226,40 @@ fun main() {
         SpeechRecognizer.instances.last().callback.onResults(null)
         t.stop()
         check(updates.isEmpty()) { updates }
+    }
+    run {
+        Handler.reset()
+        SpeechRecognizer.available = true
+        SpeechRecognizer.failStart = false
+        SpeechRecognizer.failStop = false
+        SpeechRecognizer.callbackOnCancel = false
+        SpeechRecognizer.instances.clear()
+        val directory = Files.createTempDirectory("speech-text-only").toFile()
+        val destination = File(directory, "recording.wav")
+        val availability = mutableListOf<String>()
+        val transcriber = SpeechTranscriber(Context(), object : SpeechTranscriber.Listener {
+            override fun onTranscript(text: String, isFinal: Boolean) = Unit
+            override fun onStateChanged(state: String) = Unit
+            override fun onError(reason: String) = error(reason)
+            override fun onAudioUnavailable(reason: String) { availability += reason }
+            override fun onAudioSaved(fileName: String, durationMs: Long) = error("OS provider claimed invented audio")
+        }, audioFile = destination)
+        try {
+            transcriber.start()
+            transcriber.start()
+            check(availability.size == 1 && availability.single().contains("text only"))
+            SpeechRecognizer.instances.last().callback.onResults(Bundle("text remains available"))
+            Handler.advance(700)
+            check(SpeechRecognizer.instances.size == 2 && availability.size == 1)
+            transcriber.stop()
+            SpeechRecognizer.instances.last().callback.onResults(Bundle("final text"))
+            check(!destination.exists() && directory.listFiles().orEmpty().isEmpty())
+            passed += 1
+            println("PASS OS provider explicitly reports text-only capability without inventing audio")
+        } finally {
+            transcriber.destroy()
+            directory.deleteRecursively()
+        }
     }
     println("$passed speech lifecycle scenarios passed")
 }

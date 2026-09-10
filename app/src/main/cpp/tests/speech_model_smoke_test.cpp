@@ -132,6 +132,11 @@ int main(int argc, char ** argv) {
                 throw std::runtime_error("JFK reference content is incomplete: " + text);
             }
         }
+        const auto wordTiming = takeString(Java_com_sainadh_livenotes_stt_NemotronTranscriber_nativeWordTimings(&env, nullptr, handle));
+        if (std::string(transcribe_model_arch_string(native->model)) == "parakeet" && wordTiming.empty()) {
+            throw std::runtime_error("Parakeet word alignment was not returned");
+        }
+        std::cout << "word_timing_begin\n" << wordTiming << "word_timing_end\n";
         if (!Java_com_sainadh_livenotes_stt_NemotronTranscriber_nativeRestartStream(
             &env, nullptr, handle, reinterpret_cast<jstring>(&language), -1)) {
             checkJava();

@@ -3,6 +3,7 @@ import android.app.NotificationManager
 import android.os.PowerManager
 open class Context {
     val packageName = "test"
+    val filesDir = java.io.File(System.getProperty("java.io.tmpdir"), "listening-service-test")
     fun getSystemService(name: String): Any = when (name) {
         NOTIFICATION_SERVICE -> NotificationManager
         POWER_SERVICE -> PowerManager()

@@ -18,6 +18,8 @@
  */
 
 #include <jni.h>
+#include <algorithm>
+#include <cctype>
 #include <string>
 #include <memory>
 #include <cstdio>
@@ -371,6 +373,68 @@ Java_com_sainadh_livenotes_stt_NemotronTranscriber_nativeFinalizeStream(
         return nullptr;
     }
     return makeJString(env, text.committed_text);
+}
+
+// Copy decoder timing only when the engine explicitly reports word-or-finer
+// alignment. Text is hex UTF-8 so separators cannot corrupt the sidecar format.
+JNIEXPORT jstring JNICALL
+Java_com_sainadh_livenotes_stt_NemotronTranscriber_nativeWordTimings(
+        JNIEnv * env, jobject, jlong handle) {
+    auto * ns = reinterpret_cast<NativeSession *>(handle);
+    if (ns == nullptr || ns->session == nullptr) return makeJString(env, "");
+    const auto kind = transcribe_returned_timestamp_kind(ns->session);
+    if (kind != TRANSCRIBE_TIMESTAMPS_WORD && kind != TRANSCRIBE_TIMESTAMPS_TOKEN)
+        return makeJString(env, "");
+    try {
+        std::string result;
+        const char hex[] = "0123456789abcdef";
+        struct TimedWord { std::string text; int64_t start; int64_t end; };
+        std::vector<TimedWord> words;
+        const int count = transcribe_n_words(ns->session);
+        for (int index = 0; index < count; ++index) {
+            transcribe_word word;
+            transcribe_word_init(&word);
+            const auto status = transcribe_get_word(ns->session, index, &word);
+            if (status != TRANSCRIBE_OK || word.text == nullptr || word.t0_ms < 0 || word.t1_ms < word.t0_ms)
+                return makeJString(env, "");
+            words.push_back({word.text, word.t0_ms, word.t1_ms});
+        }
+        // The pinned Parakeet streaming implementation exposes token timestamps
+        // but leaves its word table empty even at finalize. Join subword pieces
+        // using the decoded whitespace boundaries; retain real decoder starts.
+        if (words.empty() && kind == TRANSCRIBE_TIMESTAMPS_TOKEN) {
+            TimedWord current{"", 0, 0};
+            for (int index = 0; index < transcribe_n_tokens(ns->session); ++index) {
+                transcribe_token token;
+                transcribe_token_init(&token);
+                if (transcribe_get_token(ns->session, index, &token) != TRANSCRIBE_OK || token.text == nullptr ||
+                    token.t0_ms < 0 || token.t1_ms < token.t0_ms) return makeJString(env, "");
+                for (const auto * byte = reinterpret_cast<const unsigned char *>(token.text); *byte; ++byte) {
+                    if (std::isspace(*byte)) {
+                        if (!current.text.empty()) { words.push_back(current); current.text.clear(); }
+                    } else {
+                        if (current.text.empty()) { current.start = token.t0_ms; current.end = token.t1_ms; }
+                        current.text += static_cast<char>(*byte);
+                        current.end = std::max(current.end, token.t1_ms);
+                    }
+                }
+            }
+            if (!current.text.empty()) words.push_back(current);
+        }
+        for (const auto & word : words) {
+            result += std::to_string(word.start) + "\t" + std::to_string(word.end) + "\t";
+            for (const auto byte : word.text) {
+                const auto value = static_cast<unsigned char>(byte);
+                result += hex[value >> 4];
+                result += hex[value & 15];
+            }
+            result += '\n';
+        }
+        return makeJString(env, result.c_str());
+    } catch (const std::exception & error) {
+        throwJavaError(env, error.what());
+        return nullptr;
+    }
 }
 
 /*

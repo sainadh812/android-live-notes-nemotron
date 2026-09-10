@@ -8,6 +8,9 @@ import com.sainadh.livenotes.stt.NativeTranscriptSegments
 import com.sainadh.livenotes.stt.TranscriptStatus
 import com.sainadh.livenotes.stt.TranscriptUpdate
 import java.io.File
+import java.nio.ByteBuffer
+import java.nio.ByteOrder
+import java.nio.file.Files
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicInteger
 
@@ -26,7 +29,11 @@ fun main(args: Array<String>) {
     val mainThread = Thread.currentThread()
     val events = mutableListOf<String>()
     val updates = mutableListOf<TranscriptUpdate>()
+    val audioProgress = mutableListOf<Pair<Long, Float>>()
+    val savedAudio = mutableListOf<Pair<String, Long>>()
     val model = File.createTempFile("stub-model", ".gguf")
+    val audioDirectory = Files.createTempDirectory("capture-test").toFile()
+    val audioFile = if (scenario.startsWith("saved-")) File(audioDirectory, "recording.wav") else null
     val transcriber = NemotronTranscriber(Context(), model.path, listener = object : SpeechTranscriber.Listener {
         private fun event(value: String) {
             check(Thread.currentThread() === mainThread) { "Callback delivered off main thread" }
@@ -34,12 +41,20 @@ fun main(args: Array<String>) {
         }
         override fun onStateChanged(state: String) = event(state)
         override fun onError(reason: String) = event("error:$reason")
+        override fun onAudioProgress(durationMs: Long, level: Float) {
+            check(Thread.currentThread() === mainThread)
+            audioProgress += durationMs to level
+        }
+        override fun onAudioSaved(fileName: String, durationMs: Long) {
+            savedAudio += fileName to durationMs
+            event("audio-saved")
+        }
         override fun onTranscript(text: String, isFinal: Boolean) = error("Legacy cumulative callback used")
         override fun onTranscriptUpdate(update: TranscriptUpdate) {
             updates += update
             event("${update.status.name.lowercase()}:${update.text}")
         }
-    })
+    }, audioFile = audioFile)
     fun stopCount() = events.count { it == "stopped" }
     fun startAndFeed() {
         val expected = Gate.feeds.get() + 1
@@ -59,6 +74,35 @@ fun main(args: Array<String>) {
     }
     try {
         when (scenario) {
+            "saved-audio", "saved-tail" -> {
+                if (scenario == "saved-tail") {
+                    AudioRecord.availableFrames.set(17_123)
+                    Gate.blockEmptyRead = true
+                }
+                startAndFeed()
+                if (scenario == "saved-tail") {
+                    check(Gate.readEntered.await(5, TimeUnit.SECONDS))
+                    transcriber.stop()
+                    Gate.readRelease.countDown()
+                }
+                stopAndWait(1)
+                val file = checkNotNull(audioFile)
+                check(file.isFile && !File(audioDirectory, "recording.wav.part").exists())
+                val data = file.readBytes()
+                check(data.size == 44 + AudioRecord.readFrames.get() * 2)
+                val header = ByteBuffer.wrap(data).order(ByteOrder.LITTLE_ENDIAN)
+                check(header.getInt(40) == data.size - 44)
+                check((44 until data.size step 2).all { header.getShort(it).toInt() == 16384 })
+                val duration = AudioRecord.readFrames.get() * 1_000L / 16_000
+                check(savedAudio == listOf("recording.wav" to duration))
+                check(events.indexOf("audio-saved") < events.indexOf("stopped"))
+                check(audioProgress.last().first == duration)
+                check(audioProgress.zipWithNext().all { (a, b) -> a.first <= b.first })
+                check(audioProgress.any { it.second == 0.5f })
+                check(updates.all { it.startMs == 0L && checkNotNull(it.endMs) <= duration })
+                check(updates.last().endMs == duration)
+                check(AudioRecord.starts.get() == 1 && AudioRecord.releases.get() == 1)
+            }
             "stop-init", "destroy-init" -> {
                 Gate.blockOperation = "init"
                 transcriber.start()
@@ -82,7 +126,7 @@ fun main(args: Array<String>) {
                 check(AudioRecord.starts.get() == 0) { "Microphone started after cancellation" }
                 check("listening" !in events)
             }
-            "stop-feed", "destroy-feed" -> {
+            "stop-feed", "destroy-feed", "saved-destroy" -> {
                 Gate.blockOperation = "feed"
                 startAndFeed()
                 if (scenario == "stop-feed") {
@@ -177,7 +221,7 @@ fun main(args: Array<String>) {
                 check(Gate.feedFrames.get() == AudioRecord.readFrames.get())
                 check(events.single { it.startsWith("error:") }.contains("did not finish draining"))
             }
-            "overflow" -> {
+            "overflow", "saved-overflow" -> {
                 Gate.blockOperation = "feed"
                 startAndFeed()
                 // Fill the queue only after one native call is definitely in flight.
@@ -284,13 +328,17 @@ fun main(args: Array<String>) {
                 if (scenario != "init-failure") check(Gate.destroys.get() == 1)
                 if (scenario == "finalize-failure") check(updates.last().status == TranscriptStatus.INTERRUPTED && updates.last().text == "tentative")
             }
-            "audio-init", "audio-start", "audio-read" -> {
-                Gate.audioFailure = scenario.removePrefix("audio-")
+            "audio-init", "audio-start", "audio-read", "saved-audio-start" -> {
+                Gate.audioFailure = scenario.removePrefix("saved-").removePrefix("audio-")
                 transcriber.start()
                 await("audio failure callback") { stopCount() == 1 }
                 check(events.any { it.startsWith("error:") })
                 check(AudioRecord.releases.get() == 1)
                 check(Gate.destroys.get() == 1)
+                if (scenario == "saved-audio-start") {
+                    check(savedAudio.isEmpty() && !checkNotNull(audioFile).exists())
+                    check(!File(audioDirectory, "recording.wav.part").exists())
+                }
             }
             "idle-stop" -> {
                 stopAndWait(1)
@@ -300,6 +348,18 @@ fun main(args: Array<String>) {
             }
             else -> error("Unknown scenario: $scenario")
         }
+        if (scenario == "saved-overflow" || scenario == "saved-destroy") {
+            val file = checkNotNull(audioFile)
+            check(file.isFile && file.length() == 44L + AudioRecord.readFrames.get() * 2L)
+            check(!File(audioDirectory, "recording.wav.part").exists())
+            val bytes = file.readBytes()
+            check(ByteBuffer.wrap(bytes).order(ByteOrder.LITTLE_ENDIAN).getInt(40) == bytes.size - 44)
+            if (scenario == "saved-destroy") check(savedAudio.isEmpty())
+            else {
+                check(savedAudio == listOf("recording.wav" to AudioRecord.readFrames.get() * 1_000L / 16_000))
+                check(AudioRecord.readFrames.get() > Gate.feedFrames.get()) { "Queue overflow was not exercised" }
+            }
+        }
         check(!Gate.concurrentNativeCalls) { "Native operations overlapped" }
         println("PASS $scenario")
     } finally {
@@ -307,5 +367,6 @@ fun main(args: Array<String>) {
         Gate.readRelease.countDown()
         transcriber.destroy()
         model.delete()
+        audioDirectory.deleteRecursively()
     }
 }

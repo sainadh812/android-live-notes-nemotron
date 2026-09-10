@@ -4,6 +4,8 @@ import android.Manifest
 import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
+import android.widget.Toast
+import androidx.activity.compose.BackHandler
 import androidx.activity.ComponentActivity
 import androidx.activity.SystemBarStyle
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -60,6 +62,7 @@ import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
@@ -85,6 +88,8 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.layout.safeDrawingPadding
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -92,6 +97,16 @@ import com.sainadh.livenotes.ai.LlmProvider
 import com.sainadh.livenotes.audio.AudioInputMode
 import com.sainadh.livenotes.data.DailyNote
 import com.sainadh.livenotes.data.SavedRecording
+import com.sainadh.livenotes.sharing.RecordingSharing
+import com.sainadh.livenotes.ui.RecorderHero
+import com.sainadh.livenotes.ui.LiveTranscriptPanel
+import com.sainadh.livenotes.ui.RecordingLibraryCard
+import com.sainadh.livenotes.ui.RecordingDetailScreen
+import com.sainadh.livenotes.ui.TextActions
+import com.sainadh.livenotes.ui.recordingTime
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import com.sainadh.livenotes.service.CapturePhase
 import com.sainadh.livenotes.service.ServiceStateTracker
 import com.sainadh.livenotes.stt.ModelDownloadState
@@ -102,6 +117,7 @@ import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import java.util.Locale
+import java.io.File
 
 private val Paper = Color(0xFFF6F5F0)
 private val Ink = Color(0xFF203632)
@@ -135,10 +151,15 @@ class MainActivity : ComponentActivity() {
             viewModel.testConnection(viewModel.currentProvider(), viewModel.currentModel(), "")
         }
     }
+
+    override fun onStop() {
+        viewModel.pausePlayback()
+        super.onStop()
+    }
 }
 
 @Composable
-private fun LiveNotesTheme(content: @Composable () -> Unit) {
+internal fun LiveNotesTheme(content: @Composable () -> Unit) {
     MaterialTheme(
         colorScheme = lightColorScheme(
             primary = Teal, onPrimary = Color.White,
@@ -179,9 +200,51 @@ private fun LiveNotesScreen(viewModel: MainViewModel, activityLifecycle: Lifecyc
     val settingsScroll = rememberLazyListState()
     val todayNote by viewModel.todayNote.collectAsStateWithLifecycle(lifecycle = activityLifecycle)
     val allNotes by viewModel.allNotes.collectAsStateWithLifecycle(lifecycle = activityLifecycle)
-    val savedRecordings = if (screen == AppScreen.NOTES) {
-        viewModel.savedRecordings.collectAsStateWithLifecycle(lifecycle = activityLifecycle).value
-    } else emptyList()
+    val savedRecordings by viewModel.savedRecordings.collectAsStateWithLifecycle(lifecycle = activityLifecycle)
+    val playback by viewModel.playback.collectAsStateWithLifecycle(lifecycle = activityLifecycle)
+    val durationMs by ServiceStateTracker.durationMs.collectAsStateWithLifecycle(lifecycle = activityLifecycle)
+    val audioLevel by ServiceStateTracker.audioLevel.collectAsStateWithLifecycle(lifecycle = activityLifecycle)
+    val liveSegments by ServiceStateTracker.liveSegments.collectAsStateWithLifecycle(lifecycle = activityLifecycle)
+    val audioNotice by ServiceStateTracker.audioNotice.collectAsStateWithLifecycle(lifecycle = activityLifecycle)
+    var openedRecordingId by rememberSaveable { mutableStateOf<String?>(null) }
+    // Only a short cache filename enters saved state; a long meeting must not overflow its Bundle.
+    var exportDraftName by rememberSaveable { mutableStateOf<String?>(null) }
+    val coroutineScope = rememberCoroutineScope()
+    val exportLauncher = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("text/plain")) { uri ->
+        val draftName = exportDraftName
+        exportDraftName = null
+        if (draftName != null) {
+            coroutineScope.launch {
+                val result = withContext(Dispatchers.IO) {
+                    val draft = File(context.cacheDir, draftName)
+                    runCatching {
+                        if (uri != null) {
+                            requireNotNull(context.contentResolver.openOutputStream(uri, "wt")) { "Unable to open the selected file" }
+                                .use { output -> draft.inputStream().use { it.copyTo(output) } }
+                        }
+                    }.also { draft.delete() }
+                }
+                if (uri != null) Toast.makeText(context, if (result.isSuccess) "Text file saved" else "Could not save this file. Please try another location.", Toast.LENGTH_LONG).show()
+            }
+        }
+    }
+    fun export(text: String, filename: String) {
+        coroutineScope.launch {
+            val draft = withContext(Dispatchers.IO) {
+                runCatching { File.createTempFile("text-export-", ".txt", context.cacheDir).apply { writeText(text, Charsets.UTF_8) } }
+            }
+            draft.onSuccess { file ->
+                exportDraftName = file.name
+                runCatching { exportLauncher.launch(filename) }.onFailure {
+                    exportDraftName = null
+                    withContext(Dispatchers.IO) { file.delete() }
+                    Toast.makeText(context, "A document app is needed to save a text file.", Toast.LENGTH_LONG).show()
+                }
+            }.onFailure {
+                Toast.makeText(context, "Could not prepare this text file. Check device storage.", Toast.LENGTH_LONG).show()
+            }
+        }
+    }
     val latestTranscript by viewModel.latestTranscript.collectAsStateWithLifecycle(lifecycle = activityLifecycle)
     val connectionStatus by viewModel.connectionStatus.collectAsStateWithLifecycle(lifecycle = activityLifecycle)
     val currentAudioRoute by ServiceStateTracker.audioRoute.collectAsStateWithLifecycle(lifecycle = activityLifecycle)
@@ -219,11 +282,56 @@ private fun LiveNotesScreen(viewModel: MainViewModel, activityLifecycle: Lifecyc
         if (permissions.isEmpty()) viewModel.startListening() else permissionLauncher.launch(permissions)
     }
 
+    val openedRecording = savedRecordings.firstOrNull { it.recordingId == openedRecordingId }
+    if (openedRecording != null) {
+        BackHandler { openedRecordingId = null }
+        Box(Modifier.fillMaxSize().background(Paper).safeDrawingPadding(), contentAlignment = Alignment.TopCenter) {
+            Box(Modifier.widthIn(max = 840.dp).fillMaxSize()) {
+                RecordingDetailScreen(
+                    recording = openedRecording,
+                    playback = playback,
+                    captureActive = capturePhase != CapturePhase.IDLE,
+                    onBack = { openedRecordingId = null },
+                    onPlay = {
+                        if (playback.recordingId == openedRecording.recordingId) viewModel.togglePlayback()
+                        else viewModel.playRecording(openedRecording)
+                    },
+                    onPlayFrom = { position -> viewModel.playRecording(openedRecording, position) },
+                    onSeek = { position ->
+                        if (playback.recordingId == openedRecording.recordingId) viewModel.seekPlayback(position)
+                        else viewModel.playRecording(openedRecording, position)
+                    },
+                    onSpeed = viewModel::setPlaybackSpeed,
+                    onCopy = { RecordingSharing.copyText(context, openedRecording.text, "Transcript") },
+                    onShare = { RecordingSharing.shareText(context, openedRecording.text, openedRecording.title) },
+                    onShareAudio = { RecordingSharing.shareAudio(context, openedRecording) },
+                    onExport = { export(openedRecording.text, "transcript-${openedRecording.dateKey}.txt") }
+                )
+            }
+        }
+        return
+    }
+
     Scaffold(
         modifier = Modifier.fillMaxSize(),
         containerColor = Paper,
         bottomBar = {
-            NavigationBar(containerColor = Paper, tonalElevation = 0.dp) {
+            Column {
+                val currentRecording = savedRecordings.firstOrNull { it.recordingId == playback.recordingId }
+                if (currentRecording != null && capturePhase == CapturePhase.IDLE) {
+                    Surface(color = SoftTeal, modifier = Modifier.fillMaxWidth()) {
+                        Row(Modifier.padding(horizontal = 16.dp, vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+                            TextButton(onClick = { openedRecordingId = currentRecording.recordingId }, modifier = Modifier.weight(1f).heightIn(min = 48.dp)) {
+                                Column(Modifier.fillMaxWidth()) {
+                                    Text(currentRecording.title, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                    Text("${recordingTime(playback.positionMs)} / ${recordingTime(playback.durationMs)} · Open player", style = MaterialTheme.typography.bodySmall)
+                                }
+                            }
+                            TextButton(onClick = viewModel::togglePlayback, modifier = Modifier.heightIn(min = 48.dp)) { Text(if (playback.isPlaying) "Pause" else "Play") }
+                        }
+                    }
+                }
+                NavigationBar(containerColor = Paper, tonalElevation = 0.dp) {
                 AppScreen.entries.forEach { destination ->
                     NavigationBarItem(
                         selected = screen == destination,
@@ -236,11 +344,13 @@ private fun LiveNotesScreen(viewModel: MainViewModel, activityLifecycle: Lifecyc
                         )
                     )
                 }
+                }
             }
         }
     ) { padding ->
+        Box(Modifier.fillMaxSize().padding(padding), contentAlignment = Alignment.TopCenter) {
         LazyColumn(
-            modifier = Modifier.fillMaxSize().padding(padding).imePadding(),
+            modifier = Modifier.widthIn(max = 840.dp).fillMaxSize().imePadding(),
             state = when (screen) {
                 AppScreen.RECORD -> recordScroll
                 AppScreen.NOTES -> notesScroll
@@ -254,15 +364,17 @@ private fun LiveNotesScreen(viewModel: MainViewModel, activityLifecycle: Lifecyc
                 AppScreen.RECORD -> {
                     item {
                         PageHeading(
-                            title = "Space for your thoughts.",
-                            subtitle = "A conversation today. Something to remember tomorrow."
+                            title = "Listen. Capture. Remember.",
+                            subtitle = "Your conversations, ready to replay."
                         )
                     }
                     item {
-                        RecordControl(
+                        RecorderHero(
                             phase = capturePhase,
+                            durationMs = durationMs,
+                            audioLevel = audioLevel,
                             activeEngine = activeEngine,
-                            selectedEngine = speechSettings.model?.title ?: "Android speech",
+                            selectedEngine = speechSettings.model?.title ?: "Android speech · Transcript only",
                             audioRoute = currentAudioRoute,
                             onToggle = {
                                 if (capturePhase == CapturePhase.PREPARING || capturePhase == CapturePhase.RECORDING) viewModel.stopListening()
@@ -270,23 +382,47 @@ private fun LiveNotesScreen(viewModel: MainViewModel, activityLifecycle: Lifecyc
                             }
                         )
                     }
+                    if (speechSettings.model == null && capturePhase == CapturePhase.IDLE) {
+                        item {
+                            NoteSurface {
+                                Text("Keep the audio, too", style = MaterialTheme.typography.titleMedium)
+                                Text("Android speech saves text only. Select an on-device speech model to save audio and replay it with your transcript.", style = MaterialTheme.typography.bodyMedium, color = Muted)
+                                TextButton(onClick = { screen = AppScreen.SETTINGS }, modifier = Modifier.heightIn(min = 48.dp)) { Text("Choose a recording model") }
+                            }
+                        }
+                    }
                     if (!transcriptionError.isNullOrBlank()) {
                         item { AttentionCard("Recording needs attention", transcriptionError!!) }
                     }
-                    item { TranscriptCard(capturePhase, latestTranscript) }
+                    if (!audioNotice.isNullOrBlank()) {
+                        item { AttentionCard("Audio recording", audioNotice!!) }
+                    }
+                    item {
+                        LiveTranscriptPanel(capturePhase, latestTranscript, liveSegments,
+                            onCopy = { RecordingSharing.copyText(context, latestTranscript, "Transcript") },
+                            onShare = { RecordingSharing.shareText(context, latestTranscript, "Live transcript") },
+                            onExport = { export(latestTranscript, "transcript-${LocalDate.now()}.txt") })
+                    }
+                    if (capturePhase == CapturePhase.IDLE && savedRecordings.isNotEmpty()) {
+                        item {
+                            TextButton(onClick = { openedRecordingId = savedRecordings.first().recordingId }, modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)) {
+                                Text("Open latest recording & transcript →")
+                            }
+                        }
+                    }
                     item {
                         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
                             Text("Today's notes", style = MaterialTheme.typography.titleLarge)
                             TextButton(onClick = { screen = AppScreen.NOTES }, modifier = Modifier.heightIn(min = 48.dp)) { Text("View all") }
                         }
                     }
-                    item { SummaryCard(todayNote, compact = true) }
+                    item { SummaryCard(todayNote, compact = true, onExport = { text -> export(text, "notes-${LocalDate.now()}.txt") }) }
                     if (!summaryError.isNullOrBlank()) {
                         item { AttentionCard("Summary needs attention", summaryError!!, "Retry summary", viewModel::retrySummary) }
                     }
                 }
                 AppScreen.NOTES -> {
-                    item { PageHeading("Your notes", "The useful parts, all in one place.") }
+                    item { PageHeading("Your library", "Replay the conversation. Rediscover the details.") }
                     if (!summaryError.isNullOrBlank()) {
                         item { AttentionCard("Summary needs attention", summaryError!!, "Retry summary", viewModel::retrySummary) }
                     }
@@ -300,13 +436,23 @@ private fun LiveNotesScreen(viewModel: MainViewModel, activityLifecycle: Lifecyc
                         }
                     } else {
                         if (savedRecordings.isNotEmpty()) {
-                            item { Text("Saved transcripts", style = MaterialTheme.typography.titleLarge) }
-                            items(savedRecordings, key = { "recording:${it.recordingId}" }) { recording -> RecordingCard(recording) }
+                            item { Text("Recordings · ${savedRecordings.size}", style = MaterialTheme.typography.titleLarge) }
+                            items(savedRecordings, key = { "recording:${it.recordingId}" }) { recording ->
+                                RecordingLibraryCard(recording,
+                                    isPlaying = playback.recordingId == recording.recordingId && playback.isPlaying,
+                                    playbackEnabled = capturePhase == CapturePhase.IDLE,
+                                    onOpen = { openedRecordingId = recording.recordingId },
+                                    onPlay = {
+                                        openedRecordingId = recording.recordingId
+                                        if (playback.recordingId == recording.recordingId) viewModel.togglePlayback()
+                                        else viewModel.playRecording(recording)
+                                    })
+                            }
                         }
                         if (allNotes.isNotEmpty()) {
                             item { Text("Daily summaries", style = MaterialTheme.typography.titleLarge) }
                         }
-                        items(allNotes, key = { it.dateKey }) { note -> HistoryCard(note) }
+                        items(allNotes, key = { "note:${it.dateKey}" }) { note -> HistoryCard(note, onExport = { text -> export(text, "notes-${note.dateKey}.txt") }) }
                     }
                 }
                 AppScreen.SETTINGS -> {
@@ -363,6 +509,7 @@ private fun LiveNotesScreen(viewModel: MainViewModel, activityLifecycle: Lifecyc
             }
         }
     }
+    }
 }
 
 @Composable
@@ -387,7 +534,7 @@ private fun SpeechSettingsPanel(
         }
         SelectionRow(
             title = "Android speech",
-            description = "Uses your phone's speech service. Internet use depends on your device.",
+            description = "Transcript only; audio is not saved. Internet use depends on your device. Choose an on-device model below for audio playback.",
             selected = selectedModel == null,
             onClick = { onSelectModel(null) }
         )
@@ -506,97 +653,8 @@ private fun PageHeading(title: String, subtitle: String) {
 }
 
 @Composable
-private fun RecordControl(
-    phase: CapturePhase,
-    activeEngine: String,
-    selectedEngine: String,
-    audioRoute: String,
-    onToggle: () -> Unit
-) {
-    val active = phase == CapturePhase.RECORDING || phase == CapturePhase.PREPARING
-    Card(colors = CardDefaults.cardColors(containerColor = Ink), shape = RoundedCornerShape(28.dp)) {
-        Column(Modifier.fillMaxWidth().padding(22.dp), verticalArrangement = Arrangement.spacedBy(18.dp)) {
-            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(7.dp)) {
-                    Box(Modifier.size(7.dp).background(if (active) Color(0xFFB3DFC8) else Color(0xFFD4E0D9), CircleShape))
-                    Text(
-                        when (phase) {
-                            CapturePhase.IDLE -> "READY WHEN YOU ARE"
-                            CapturePhase.PREPARING -> "GETTING READY"
-                            CapturePhase.RECORDING -> "RECORDING"
-                            CapturePhase.FINISHING -> "SAVING YOUR WORDS"
-                        },
-                        color = Color(0xFFD4E8DC), style = MaterialTheme.typography.labelMedium, letterSpacing = 1.sp
-                    )
-                }
-                Spacer(Modifier.weight(1f))
-                LineIcon(NoteIcon.WAVE, Color(0xFFB3DFC8), Modifier.size(28.dp))
-            }
-            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                Text(
-                    when (phase) {
-                        CapturePhase.IDLE -> "One tap. Start talking."
-                        CapturePhase.PREPARING -> "Preparing to listen…"
-                        CapturePhase.RECORDING -> "Go ahead. I'm listening."
-                        CapturePhase.FINISHING -> "Finishing your transcript…"
-                    },
-                    style = MaterialTheme.typography.headlineSmall, color = Color.White
-                )
-                Text(if (phase == CapturePhase.IDLE) selectedEngine else activeEngine, style = MaterialTheme.typography.bodyMedium, color = Color(0xFFCBDED2))
-                if (active && audioRoute != "Not listening") {
-                    Text(audioRoute, color = Color(0xFFCBDED2), style = MaterialTheme.typography.bodySmall)
-                }
-            }
-            Button(
-                onClick = onToggle,
-                enabled = phase != CapturePhase.FINISHING,
-                modifier = Modifier.fillMaxWidth().heightIn(min = 60.dp),
-                shape = RoundedCornerShape(18.dp),
-                colors = ButtonDefaults.buttonColors(
-                    containerColor = if (active) Color(0xFFFFE8DC) else Color(0xFFD2EAD7),
-                    contentColor = if (active) Color(0xFF753C2A) else Ink,
-                    disabledContainerColor = Color(0xFF415650), disabledContentColor = Color.White
-                ),
-                contentPadding = PaddingValues(horizontal = 16.dp, vertical = 16.dp)
-            ) {
-                LineIcon(if (active) NoteIcon.STOP else NoteIcon.MIC,
-                    if (phase == CapturePhase.FINISHING) Color.White else if (active) Color(0xFF753C2A) else Ink)
-                Spacer(Modifier.width(10.dp))
-                Text(if (phase == CapturePhase.FINISHING) "Saving…" else if (active) "Stop recording" else "Start recording")
-            }
-        }
-    }
-}
-
-@Composable
-private fun TranscriptCard(phase: CapturePhase, transcript: String) {
-    NoteSurface {
-        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
-            Text("Transcript", style = MaterialTheme.typography.titleMedium)
-            if (phase == CapturePhase.RECORDING) Badge("LIVE")
-            else if (transcript.isNotBlank()) Badge(if (phase == CapturePhase.FINISHING) "SAVING" else "LAST CAPTURE")
-        }
-        SelectionContainer {
-            Text(
-                text = transcript.ifBlank {
-                    when (phase) {
-                        CapturePhase.IDLE -> "Your words will appear here. Start a recording whenever you're ready."
-                        CapturePhase.PREPARING -> "Getting your speech engine ready. Wait for recording to begin."
-                        CapturePhase.RECORDING -> "Listening for your first words…"
-                        CapturePhase.FINISHING -> "Waiting for the last words to finish…"
-                    }
-                },
-                modifier = Modifier.fillMaxWidth().heightIn(min = 84.dp),
-                style = MaterialTheme.typography.bodyLarge,
-                color = if (transcript.isBlank()) Muted else Ink
-            )
-        }
-        Text("Press and hold text to select or copy.", style = MaterialTheme.typography.bodySmall, color = Muted)
-    }
-}
-
-@Composable
-private fun SummaryCard(note: DailyNote?, compact: Boolean = false) {
+private fun SummaryCard(note: DailyNote?, compact: Boolean = false, onExport: (String) -> Unit) {
+    val context = LocalContext.current
     NoteSurface {
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(9.dp)) {
             LineIcon(NoteIcon.NOTES, Teal, Modifier.size(21.dp))
@@ -618,11 +676,28 @@ private fun SummaryCard(note: DailyNote?, compact: Boolean = false) {
                 Text("+ ${note.actionItems.size - 3} more in Notes", style = MaterialTheme.typography.bodySmall, color = Teal)
             }
         }
+        if (note != null) {
+            val text = noteText(note)
+            TextActions(text,
+                onCopy = { RecordingSharing.copyText(context, text, "Meeting notes") },
+                onShare = { RecordingSharing.shareText(context, text, "Notes · ${note.dateKey}") },
+                onExport = { onExport(text) })
+        }
+    }
+}
+
+private fun noteText(note: DailyNote): String = buildString {
+    append(note.summary)
+    if (note.actionItems.isNotEmpty()) {
+        if (isNotEmpty()) append("\n\n")
+        append("Next steps\n")
+        append(note.actionItems.joinToString("\n") { "• $it" })
     }
 }
 
 @Composable
-private fun HistoryCard(note: DailyNote) {
+private fun HistoryCard(note: DailyNote, onExport: (String) -> Unit) {
+    val context = LocalContext.current
     var expanded by rememberSaveable(note.dateKey) { mutableStateOf(false) }
     NoteSurface {
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
@@ -642,35 +717,13 @@ private fun HistoryCard(note: DailyNote) {
             Text("Next steps", style = MaterialTheme.typography.titleMedium)
             note.actionItems.forEach { ActionItem(it) }
         }
+        val shareableText = noteText(note)
+        TextActions(shareableText,
+            onCopy = { RecordingSharing.copyText(context, shareableText, "Meeting notes") },
+            onShare = { RecordingSharing.shareText(context, shareableText, "Notes · ${note.dateKey}") },
+            onExport = { onExport(shareableText) })
         TextButton(onClick = { expanded = !expanded }, modifier = Modifier.heightIn(min = 48.dp)) {
             Text(if (expanded) "Show less" else "Read note")
-            Spacer(Modifier.width(6.dp))
-            LineIcon(NoteIcon.ARROW, Teal, Modifier.size(18.dp))
-        }
-    }
-}
-
-@Composable
-private fun RecordingCard(recording: SavedRecording) {
-    var expanded by rememberSaveable(recording.recordingId) { mutableStateOf(false) }
-    NoteSurface {
-        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
-            Text(friendlyDate(recording.dateKey), style = MaterialTheme.typography.titleMedium)
-            Text(
-                Instant.ofEpochMilli(recording.updatedAtEpochMs).atZone(ZoneId.systemDefault())
-                    .format(DateTimeFormatter.ofPattern("HH:mm", Locale.getDefault())),
-                style = MaterialTheme.typography.bodySmall, color = Muted
-            )
-        }
-        if (recording.hasUnconfirmedWords) {
-            Text("Contains unconfirmed words", style = MaterialTheme.typography.bodySmall, color = ErrorInk)
-        }
-        SelectionContainer {
-            Text(recording.text, style = MaterialTheme.typography.bodyLarge,
-                maxLines = if (expanded) Int.MAX_VALUE else 4, overflow = TextOverflow.Ellipsis)
-        }
-        TextButton(onClick = { expanded = !expanded }, modifier = Modifier.heightIn(min = 48.dp)) {
-            Text(if (expanded) "Show less" else "Read transcript")
             Spacer(Modifier.width(6.dp))
             LineIcon(NoteIcon.ARROW, Teal, Modifier.size(18.dp))
         }
@@ -883,8 +936,8 @@ private fun RecordPreview() {
             Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(18.dp)) {
                 BrandHeader()
                 PageHeading("Space for your thoughts.", "A conversation today. Something to remember tomorrow.")
-                RecordControl(CapturePhase.IDLE, "", "Android speech", "Not listening") {}
-                TranscriptCard(CapturePhase.IDLE, "")
+                RecorderHero(CapturePhase.IDLE, 0L, 0f, "", "Android speech", "Not listening") {}
+                LiveTranscriptPanel(CapturePhase.IDLE, "", emptyList(), {}, {}, {})
             }
         }
     }

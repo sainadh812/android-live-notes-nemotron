@@ -8,11 +8,13 @@ import android.os.Looper
 import android.speech.RecognitionListener
 import android.speech.RecognizerIntent
 import android.speech.SpeechRecognizer
+import java.io.File
 import java.util.Locale
 
 class SpeechTranscriber(
     private val context: Context,
-    private val listener: Listener
+    private val listener: Listener,
+    private val audioFile: File? = null
 ) {
     interface Listener {
         fun onTranscript(text: String, isFinal: Boolean)
@@ -21,6 +23,11 @@ class SpeechTranscriber(
         }
         fun onStateChanged(state: String)
         fun onError(reason: String)
+        /** Actual captured PCM duration and normalized RMS (0..1). */
+        fun onAudioProgress(durationMs: Long, level: Float) {}
+        /** Emitted only after a nonempty recording is finalized to app storage. */
+        fun onAudioSaved(fileName: String, durationMs: Long) {}
+        fun onAudioUnavailable(reason: String) {}
     }
 
     private val mainHandler = Handler(Looper.getMainLooper())
@@ -40,6 +47,14 @@ class SpeechTranscriber(
         if (running || stopping || destroyed) return@onMain
         running = true
         consecutiveRecoverableErrors = 0
+        if (audioFile != null) {
+            // EXTRA_AUDIO_SOURCE (API 33) is optional: unsupported providers open
+            // their own microphone. There is no reliable capability handshake,
+            // so sharing a second recorder here can silently lose actual audio.
+            listener.onAudioUnavailable(
+                "Android speech records text only. Select a downloaded speech model to save audio and replay your transcript."
+            )
+        }
         startSession()
     }
 

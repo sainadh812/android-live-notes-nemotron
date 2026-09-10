@@ -15,6 +15,10 @@ failed stops, and empty final results preserve the last hypothesis as
 words. Late callbacks are rejected immediately after results/errors, including
 during the retry delay and during provider cancellation. Repeated partials and
 duplicate terminal callbacks do not produce extra updates.
+When an audio output is requested, the wrapper explicitly reports text-only
+capability once per recording and never creates an invented audio file. Generic
+OS speech providers own the microphone; their optional external-audio extra does
+not offer a dependable capability handshake for sharing the app's capture.
 These validate wrapper lifecycle behavior; actual OS speech services, microphone
 routing, Android service/notification behavior, and runtime permissions still
 need device testing.

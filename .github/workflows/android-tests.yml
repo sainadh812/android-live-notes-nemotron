@@ -1,0 +1,69 @@
+name: Android recorder checks
+on:
+  push:
+    branches: [main, release/v1.1.0-recorder-playback]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: android-recorder-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  android:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3
+        with:
+          distribution: temurin
+          java-version: '17'
+          cache: gradle
+      - name: Install Android test tools
+        run: |
+          sdkmanager 'platforms;android-35' 'build-tools;34.0.0' 'system-images;android-30;default;x86_64'
+          echo no | avdmanager create avd --force --name recorder --package 'system-images;android-30;default;x86_64' --device pixel_2
+          sudo chmod a+rw /dev/kvm
+      - name: Build and run host checks
+        run: |
+          ./gradlew :app:testDebugUnitTest :app:lintDebug :app:assembleDebug :app:assembleDebugAndroidTest -PemulatorTests=true --no-daemon --console=plain
+          ./scripts/test-transcriber-lifecycle.sh
+          ./scripts/test-speech-lifecycle.sh
+          ./scripts/test-listening-service.sh
+      - name: Start accelerated Android emulator
+        run: |
+          "$ANDROID_HOME/emulator/emulator" -avd recorder -no-window -no-audio -no-snapshot -no-boot-anim -gpu swiftshader_indirect -accel on > emulator.log 2>&1 &
+          timeout 120s adb wait-for-device
+          ready=false
+          for attempt in $(seq 1 90); do
+            if [ "$(adb shell getprop sys.boot_completed | tr -d '\r')" = 1 ]; then ready=true; break; fi
+            sleep 2
+          done
+          "$ready"
+          adb shell input keyevent 82
+          adb shell settings put global window_animation_scale 0
+          adb shell settings put global transition_animation_scale 0
+          adb shell settings put global animator_duration_scale 0
+      - name: Run Android playback, migration, and UI tests
+        run: ./gradlew :app:connectedDebugAndroidTest -PemulatorTests=true --no-daemon --console=plain
+      - name: Collect screenshots and device logs
+        if: always()
+        run: |
+          mkdir -p device-evidence
+          timeout 20s adb logcat -d > device-evidence/logcat.txt || true
+          timeout 20s adb exec-out run-as com.sainadh.livenotes.emulatortest cat files/ui-playback.png > device-evidence/playback.png || true
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: android-recorder-test-evidence
+          path: |
+            app/build/reports/
+            app/build/outputs/androidTest-results/
+            device-evidence/
+            emulator.log
+          retention-days: 14

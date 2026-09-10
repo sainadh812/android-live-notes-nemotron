@@ -1,6 +1,10 @@
 #include <jni.h>
 // JNI gates control the duration/failure of calls without loading a real model.
 #define PREFIX Java_com_sainadh_livenotes_stt_NemotronTranscriber_
+JNIEXPORT jstring JNICALL Java_com_sainadh_livenotes_stt_NemotronTranscriber_nativeWordTimings(
+        JNIEnv *env, jobject self, jlong handle) {
+    return (*env)->NewStringUTF(env, "");
+}
 JNIEXPORT jlong JNICALL Java_com_sainadh_livenotes_stt_NemotronTranscriber_nativeInit(
         JNIEnv *env, jobject self, jstring path, jstring lang, jint context) {
     jclass gate = (*env)->FindClass(env, "check/Gate");

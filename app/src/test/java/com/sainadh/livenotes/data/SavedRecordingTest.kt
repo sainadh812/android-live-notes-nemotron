@@ -35,5 +35,36 @@ class SavedRecordingTest {
         assertEquals("hello\nhello world", note.text)
         assertTrue(note.hasUnconfirmedWords)
         assertEquals("legacy:2026-09-06", note.recordingId)
+        assertNull(note.audioFileName)
+        assertEquals(RecordingAudioStatus.UNAVAILABLE, note.audioStatus)
+        assertTrue(note.wordCues.isEmpty())
+    }
+
+    @Test fun audioOnlyRecordingIsVisibleWithoutRecognizedSpeech() {
+        val info = RecordingEntity("silent", "2026-09-06", "Quiet meeting", 100, 2_000,
+            "silent.wav", RecordingAudioStatus.READY, 2_100)
+        val saved = savedRecordings(emptyList(), emptyList(), listOf(info)).single()
+        assertEquals("silent", saved.recordingId)
+        assertEquals("Quiet meeting", saved.title)
+        assertEquals("", saved.text)
+        assertEquals("silent.wav", saved.audioFileName)
+        assertEquals(2_000L, saved.durationMs)
+        assertEquals(100L, saved.startedAtEpochMs)
+        assertFalse(saved.hasUnconfirmedWords)
+        assertTrue(saved.wordCues.isEmpty())
+    }
+
+    @Test fun metadataAndSegmentsMergeIntoOneSessionAndKeepTheirTiming() {
+        val info = RecordingEntity("one", "2026-09-06", "Planning", 100, 3_000,
+            "one.wav", RecordingAudioStatus.READY, 3_100)
+        val rows = listOf(segment(1, "Hello world", date = "2026-09-07").copy(startMs = 500, endMs = 2_000))
+        val saved = savedRecordings(rows, emptyList(), listOf(info)).single()
+        assertEquals("Planning", saved.title)
+        assertEquals("2026-09-06", saved.dateKey)
+        assertEquals(3_100L, saved.updatedAtEpochMs)
+        assertEquals("Hello world", saved.text)
+        assertEquals(listOf("Hello", "world"), saved.wordCues.map { it.text })
+        assertEquals(500L, saved.wordCues.first().startMs)
+        assertEquals(2_000L, saved.wordCues.last().endMs)
     }
 }

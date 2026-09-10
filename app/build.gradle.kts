@@ -1,19 +1,11 @@
 import java.util.Properties
 import java.security.MessageDigest
 
-fun loadEmbeddedEnvValue(name: String): String {
-    val envFile = rootProject.file("../../.env")
-    if (!envFile.exists()) return ""
-
-    val properties = Properties()
-    envFile.inputStream().use(properties::load)
-    return properties.getProperty(name, "").trim()
-}
-
 fun escapeBuildConfigString(value: String): String =
     value.replace("\\", "\\\\").replace("\"", "\\\"")
 
-val embeddedOpenAiKey = loadEmbeddedEnvValue("OPENAI_API_KEY")
+// Distributed APKs must never include credentials from the build machine.
+val embeddedOpenAiKey = ""
 
 plugins {
     id("com.android.application")
@@ -23,6 +15,8 @@ plugins {
 }
 
 val previewBuild = providers.gradleProperty("previewBuild").orNull == "true"
+// Instrumented JVM/UI tests use x86 Android; published phone APKs always retain ARM JNI.
+val emulatorTests = providers.gradleProperty("emulatorTests").orNull == "true"
 
 android {
     namespace = "com.sainadh.livenotes"
@@ -30,11 +24,11 @@ android {
     ndkVersion = "27.2.12479018"
 
     defaultConfig {
-        applicationId = if (previewBuild) "com.sainadh.livenotes.preview" else "com.sainadh.livenotes"
+        applicationId = if (emulatorTests) "com.sainadh.livenotes.emulatortest" else if (previewBuild) "com.sainadh.livenotes.preview" else "com.sainadh.livenotes"
         minSdk = 26
         targetSdk = 35
-        versionCode = 4
-        versionName = if (previewBuild) "1.0.3-preview" else "1.0.3"
+        versionCode = 5
+        versionName = if (emulatorTests) "1.1.0-emulator-test" else if (previewBuild) "1.1.0-preview" else "1.1.0"
         manifestPlaceholders["appLabel"] = if (previewBuild) "LiveMeetingNotes Preview" else "@string/app_name"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
@@ -57,9 +51,11 @@ android {
         // for arm64-v8a (see app/src/main/jniLibs/arm64-v8a). Restrict here
         // so the build doesn't try to package other ABIs it has no .so for.
         ndk {
-            abiFilters += "arm64-v8a"
+            abiFilters += if (emulatorTests) "x86_64" else "arm64-v8a"
         }
     }
+
+    if (emulatorTests) sourceSets.getByName("main").jniLibs.setSrcDirs(emptyList<String>())
 
     buildTypes {
         debug {
