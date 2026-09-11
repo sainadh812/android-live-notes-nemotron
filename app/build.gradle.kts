@@ -59,8 +59,10 @@ android {
 
     buildTypes {
         debug {
-            isMinifyEnabled = true
-            isShrinkResources = true
+            // Instrumentation loads code from a separate APK. Keep shared Kotlin
+            // helpers that are used only by its runner, outside the app's call graph.
+            isMinifyEnabled = !emulatorTests
+            isShrinkResources = !emulatorTests
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
