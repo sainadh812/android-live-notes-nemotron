@@ -60,7 +60,9 @@ fun main(args: Array<String>) {
         val expected = Gate.feeds.get() + 1
         transcriber.start()
         transcriber.start()
-        await("first feed") { Gate.feeds.get() == expected }
+        // A queued tail can advance past the first call between polls.
+        // This is a startup milestone; each scenario checks its final counts.
+        await("first feed") { Gate.feeds.get() >= expected }
     }
     fun stopAndWait(expected: Int) {
         transcriber.stop()
