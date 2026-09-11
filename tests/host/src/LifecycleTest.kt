@@ -314,6 +314,26 @@ fun main(args: Array<String>) {
                 finalWords.append(hour.finish(expected.toString() + "last word.").text)
                 check(finalWords.toString() == expected.toString() + "last word.")
 
+                val noSpaces = NativeTranscriptSegments()
+                val noSpacesExpected = StringBuilder()
+                val noSpacesSaved = StringBuilder()
+                var noSpacesTail = ""
+                repeat(7_200) { index ->
+                    val part = if (index % 2 == 0) "中文🙂" else "𠮷文"
+                    noSpacesExpected.append(part)
+                    noSpaces.update("$part\u0001").forEach { update ->
+                        check(update.appendToPrevious)
+                        check(update.text.firstOrNull()?.isLowSurrogate() != true)
+                        check(update.text.lastOrNull()?.isHighSurrogate() != true)
+                        if (update.status == TranscriptStatus.FINAL) noSpacesSaved.append(update.text)
+                        else noSpacesTail = update.text
+                    }
+                    check(noSpacesTail.length <= 256)
+                }
+                check(noSpacesSaved.toString() + noSpacesTail == noSpacesExpected.toString())
+                noSpacesSaved.append(noSpaces.finish(noSpacesExpected.toString() + "结束🙂").text)
+                check(noSpacesSaved.toString() == noSpacesExpected.toString() + "结束🙂")
+
                 val moonshine = NativeTranscriptSegments()
                 moonshine.update("\u0001earlier full hypothesis")
                 check(moonshine.update("\u0001Completely revised.").single().text == "Completely revised.")

@@ -1,7 +1,10 @@
 package com.sainadh.livenotes.stt
 
-/** Converts JNI committed deltas into stable words and one replaceable tail. */
+/** Converts JNI committed deltas into stable text and one replaceable tail. */
 internal class NativeTranscriptSegments {
+    private companion object {
+        const val MAX_PENDING_COMMITTED_CHARS = 256
+    }
     // Keep history only for a single integrity check at finalize. Live updates
     // append to this buffer and inspect just the unfinished committed word.
     private val committed = StringBuilder()
@@ -16,9 +19,16 @@ internal class NativeTranscriptSegments {
         val newCommitted = deltaSnapshot.substring(0, separator)
         committed.append(newCommitted)
         val nextCommitted = pendingCommitted + newCommitted
-        // A committed prefix may end inside a word. Keep that last word editable
-        // until a separator arrives, preserving all spaces and punctuation exactly.
-        val stableEnd = nextCommitted.indexOfLast { it.isWhitespace() } + 1
+        // Prefer complete words, but languages without spaces and long tokens
+        // must not retain an ever-growing committed tail. Adjacent segments are
+        // joined verbatim, including when a word spans this storage boundary.
+        var stableEnd = nextCommitted.indexOfLast { it.isWhitespace() } + 1
+        if (nextCommitted.length - stableEnd > MAX_PENDING_COMMITTED_CHARS) {
+            stableEnd = nextCommitted.length - MAX_PENDING_COMMITTED_CHARS
+            if (nextCommitted[stableEnd].isLowSurrogate() && nextCommitted[stableEnd - 1].isHighSurrogate()) {
+                stableEnd++
+            }
+        }
         val delta = nextCommitted.substring(0, stableEnd)
         pendingCommitted = nextCommitted.substring(stableEnd)
         val nextTentative = pendingCommitted + deltaSnapshot.substring(separator + 1)
