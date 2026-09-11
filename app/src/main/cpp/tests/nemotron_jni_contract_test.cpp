@@ -30,6 +30,7 @@ bool englishOnly = false;
 bool streamFinalized = false;
 bool wasTruncated = false;
 std::string committedText = "Hello ", tentativeText = "world", finalTextValue = "Hello world.";
+std::string previousTentative;
 std::vector<jchar> lastStringUnits;
 
 std::string & javaString(jstring value) { return *reinterpret_cast<std::string *>(value); }
@@ -200,12 +201,15 @@ transcribe_status transcribe_stream_begin(transcribe_session *, const transcribe
     }
     streamFinalized = false;
     wasTruncated = false;
+    previousTentative.clear();
     return beginStatus;
 }
 transcribe_status transcribe_stream_feed(transcribe_session *, const float *, int count,
                                          transcribe_stream_update * update) {
     // Mirror the pinned ABI preflight, not a recognition implementation.
     if (update && update->struct_size < 40) return TRANSCRIBE_ERR_BAD_STRUCT_SIZE;
+    if (update) update->tentative_changed = tentativeText != previousTentative;
+    previousTentative = tentativeText;
     if (feedStatus == TRANSCRIBE_OK) fedSamples += count;
     return feedStatus;
 }
@@ -213,6 +217,8 @@ transcribe_status transcribe_stream_get_text(const transcribe_session *, transcr
     assert(text->struct_size == sizeof(*text));
     text->committed_text = streamFinalized ? finalTextValue.c_str() : committedText.c_str();
     text->tentative_text = streamFinalized ? "" : tentativeText.c_str();
+    text->committed_text_bytes = std::strlen(text->committed_text);
+    text->tentative_text_bytes = std::strlen(text->tentative_text);
     return textStatus;
 }
 transcribe_status transcribe_stream_finalize(transcribe_session *, transcribe_stream_update * update) {
@@ -352,6 +358,65 @@ int main() {
     deleteString(unicodeFinal);
     destroy(&env, nullptr, unicodeHandle);
 
+    // One hour at a half-second feed cadence. Every committed word crosses
+    // JNI exactly once, regardless of how much history the engine retains.
+    modelFamily = "parakeet";
+    committedText.clear();
+    tentativeText.clear();
+    const jlong hourHandle = init(&env, nullptr, path, locale, -1);
+    assert(hourHandle != 0 && pendingException.empty());
+    const std::string word = u8"नमस्ते 𠮷 🙂 ";
+    std::string reconstructed;
+    size_t transferredBytes = 0;
+    for (int i = 0; i < 7200; ++i) {
+        committedText += word;
+        tentativeText = i % 2 == 0 ? "pending" : "next";
+        auto delta = feed(&env, nullptr, hourHandle, samples);
+        assert(delta != nullptr && pendingException.empty());
+        const auto & value = javaString(delta);
+        assert(value == word + '\x01' + tentativeText);
+        reconstructed += value.substr(0, value.find('\x01'));
+        transferredBytes += value.size();
+        deleteString(delta);
+    }
+    assert(reconstructed == committedText);
+    assert(transferredBytes <= committedText.size() + 7200 * 8);
+    assert(feed(&env, nullptr, hourHandle, samples) == nullptr && pendingException.empty());
+    tentativeText.clear();
+    auto clearedTail = feed(&env, nullptr, hourHandle, samples);
+    assert(javaString(clearedTail) == std::string(1, '\x01'));
+    deleteString(clearedTail);
+    finalTextValue = committedText + "final word.";
+    auto hourFinal = finalize(&env, nullptr, hourHandle);
+    assert(javaString(hourFinal) == finalTextValue);
+    deleteString(hourFinal);
+    assert(restart(&env, nullptr, hourHandle, locale, -1) == JNI_TRUE);
+    committedText = u8"Fresh 🙂 ";
+    auto freshDelta = feed(&env, nullptr, hourHandle, samples);
+    assert(javaString(freshDelta) == committedText + '\x01');
+    deleteString(freshDelta);
+    committedText.clear();
+    assert(feed(&env, nullptr, hourHandle, samples) == nullptr);
+    assert(pendingException.find("invalid committed text boundary") != std::string::npos);
+    pendingException.clear();
+    exceptionType.clear();
+    destroy(&env, nullptr, hourHandle);
+
+    // ON_FINALIZE models may replace their entire hypothesis at any point.
+    modelFamily = "moonshine_streaming";
+    const jlong revisableHandle = init(&env, nullptr, path, locale, -1);
+    for (const auto & hypothesis : {std::string("an earlier hypothesis"), std::string("A rewritten hypothesis!"), std::string()}) {
+        tentativeText = hypothesis;
+        auto revision = feed(&env, nullptr, revisableHandle, samples);
+        assert(javaString(revision) == std::string(1, '\x01') + hypothesis);
+        deleteString(revision);
+    }
+    finalTextValue = "Entire final rewrite.";
+    auto revisedFinal = finalize(&env, nullptr, revisableHandle);
+    assert(javaString(revisedFinal) == finalTextValue);
+    deleteString(revisedFinal);
+    destroy(&env, nullptr, revisableHandle);
+
     // Truncated, overlong, surrogate, and out-of-range UTF-8 never reach CheckJNI.
     for (const auto & invalid : {std::string("\xE2\x82"), std::string("\xC0\xAF"),
                                 std::string("\xED\xA0\x80"), std::string("\xF4\x90\x80\x80")}) {
@@ -366,5 +431,5 @@ int main() {
     assert(lastStringUnits.empty());
     deleteString(empty);
 
-    std::cout << "JNI contract tests passed: feed/finalize, family extensions, locale mapping, stable final text, Unicode, truncation, cleanup.\n";
+    std::cout << "JNI contract tests passed: feed/finalize, family extensions, locale mapping, stable final text, Unicode, truncation, cleanup, 7200-update delta payload scaling, tentative revisions, restart.\n";
 }

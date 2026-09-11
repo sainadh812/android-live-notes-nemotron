@@ -21,6 +21,7 @@ import com.sainadh.livenotes.stt.SpeechModel
 import com.sainadh.livenotes.stt.SpeechTranscriber
 import com.sainadh.livenotes.stt.TranscriptStatus
 import com.sainadh.livenotes.stt.TranscriptUpdate
+import com.sainadh.livenotes.stt.LiveTranscriptBuffer
 import java.io.File
 import java.util.UUID
 import kotlinx.coroutines.CancellationException
@@ -46,6 +47,15 @@ object ServiceStateTracker {
     val durationMs = MutableStateFlow(0L)
     val audioLevel = MutableStateFlow(0f)
     val liveSegments = MutableStateFlow<List<TranscriptUpdate>>(emptyList())
+    val hasEarlierTranscript = MutableStateFlow(false)
+    @Volatile var transcriptDocument = LiveTranscriptBuffer()
+        private set
+    fun resetTranscript() {
+        transcriptDocument = LiveTranscriptBuffer()
+        latestTranscript.value = ""
+        liveSegments.value = emptyList()
+        hasEarlierTranscript.value = false
+    }
     val audioNotice = MutableStateFlow<String?>(null)
 }
 
@@ -140,11 +150,10 @@ class ForegroundListeningService : Service() {
         savedAudioDurationMs = null
         sessionErrors.clear()
         ServiceStateTracker.lastTranscriptionError.value = null
-        ServiceStateTracker.latestTranscript.value = ""
+        ServiceStateTracker.resetTranscript()
         ServiceStateTracker.recordingId.value = recordingId
         ServiceStateTracker.durationMs.value = 0L
         ServiceStateTracker.audioLevel.value = 0f
-        ServiceStateTracker.liveSegments.value = emptyList()
         ServiceStateTracker.audioNotice.value = null
         try {
             startForeground(
@@ -199,7 +208,7 @@ class ForegroundListeningService : Service() {
     }
 
     private fun callbacks(sessionGeneration: Int, recordingId: String) = object : SpeechTranscriber.Listener {
-        private val displaySegments = sortedMapOf<Long, TranscriptUpdate>()
+        private val document = ServiceStateTracker.transcriptDocument
         private var legacySegmentId = 0L
         private fun acceptsCallbacks() = generation == sessionGeneration &&
             (phase == Phase.LISTENING || phase == Phase.STOPPING)
@@ -213,19 +222,10 @@ class ForegroundListeningService : Service() {
 
         override fun onTranscriptUpdate(update: TranscriptUpdate) {
             if (!acceptsCallbacks()) return
-            val previousSegment = displaySegments[update.segmentId]
-            if (previousSegment != null && previousSegment.status != TranscriptStatus.PARTIAL) return
-            displaySegments[update.segmentId] = update
-            val text = buildString {
-                displaySegments.values.forEach { segment ->
-                    if (segment.text.isNotEmpty()) {
-                        if (isNotEmpty() && !segment.appendToPrevious) append('\n')
-                        append(segment.text)
-                    }
-                }
-            }
-            ServiceStateTracker.latestTranscript.value = text
-            ServiceStateTracker.liveSegments.value = displaySegments.values.toList()
+            val preview = document.update(update) ?: return
+            ServiceStateTracker.latestTranscript.value = preview.text
+            ServiceStateTracker.liveSegments.value = preview.segments
+            ServiceStateTracker.hasEarlierTranscript.value = preview.hasEarlierText
             val timestampMs = System.currentTimeMillis()
             val previous = lastTranscriptJob
             lastTranscriptJob = serviceScope.launch {
@@ -244,7 +244,7 @@ class ForegroundListeningService : Service() {
                     recordError("Could not save transcript: ${error.message ?: error.javaClass.simpleName}")
                 }
             }
-            if (phase == Phase.LISTENING) updateNotification(text)
+            if (phase == Phase.LISTENING) updateNotification(preview.text.takeLast(180))
         }
 
         override fun onStateChanged(state: String) {

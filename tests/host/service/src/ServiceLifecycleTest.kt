@@ -287,5 +287,27 @@ fun main() {
         check(ServiceStateTracker.lastTranscriptionError.value?.contains("Transcript storage unavailable") == true)
         check(ServiceStateTracker.lastTranscriptionError.value?.contains("Audio capture stopped early") == true)
     }
+    scenario("one hour of live updates retains every saved word with bounded display state") { service ->
+        val listener = NemotronTranscriber.last.listener
+        val orchestrator = LiveNotesApplication.instance.appContainer.conversationOrchestrator
+        val expected = StringBuilder()
+        repeat(7_200) { index ->
+            val text = "meeting word $index. "
+            expected.append(text)
+            listener.onTranscriptUpdate(TranscriptUpdate(index.toLong(), text, TranscriptStatus.FINAL,
+                appendToPrevious = true, startMs = index * 500L, endMs = (index + 1L) * 500))
+            check(ServiceStateTracker.latestTranscript.value.length <= 4_000)
+            check(ServiceStateTracker.liveSegments.value.size <= 120)
+            if (index % 100 == 99) drainUntil { orchestrator.writes.size == index + 1 }
+        }
+        service.onStartCommand(Intent(ForegroundListeningService.ACTION_STOP), 0, 2)
+        listener.onStateChanged("stopped")
+        drainUntil { service.stopped }
+        check(orchestrator.updates.size == 7_200)
+        check(orchestrator.updates.joinToString("") { it.second.text } == expected.toString())
+        check(ServiceStateTracker.transcriptDocument.fullText() == expected.toString())
+        check(ServiceStateTracker.hasEarlierTranscript.value)
+        check(ServiceStateTracker.latestTranscript.value.endsWith("meeting word 7199. "))
+    }
     println("$passed service lifecycle scenarios passed")
 }

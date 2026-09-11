@@ -13,6 +13,7 @@ import com.sainadh.livenotes.data.SavedRecording
 import com.sainadh.livenotes.data.ApiKeyStore
 import com.sainadh.livenotes.data.DailyNote
 import com.sainadh.livenotes.data.NotesRepository
+import com.sainadh.livenotes.data.RecordingDetailsCache
 import com.sainadh.livenotes.service.ForegroundListeningService
 import com.sainadh.livenotes.service.ServiceStateTracker
 import com.sainadh.livenotes.stt.ModelDownloadManager
@@ -27,11 +28,11 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.map
-import kotlinx.coroutines.flow.flowOn
 import com.sainadh.livenotes.data.alignedWordCues
 import com.sainadh.livenotes.audio.recordingAudioFile
 import com.sainadh.livenotes.stt.NativeWordTimingFile
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 class MainViewModel(
     application: Application,
@@ -79,21 +80,25 @@ class MainViewModel(
         initialValue = null
     )
 
-    val savedRecordings = repository.observeSavedRecordings().map { recordings ->
-        recordings.map { recording ->
-            if (recording.audioFileName == null) recording else {
-                val cues = runCatching {
-                    val audio = recordingAudioFile(application, recording.audioFileName)
-                    alignedWordCues(recording.text, NativeWordTimingFile.read(audio), recording.durationMs)
-                }.getOrDefault(emptyList())
-                recording.copy(nativeWordCues = cues)
-            }
-        }
-    }.flowOn(Dispatchers.IO).stateIn(
+    val savedRecordings = repository.observeSavedRecordings(
+        ServiceStateTracker.capturePhase.map { it != CapturePhase.IDLE }
+    ).stateIn(
         scope = viewModelScope,
         started = SharingStarted.WhileSubscribed(5_000),
         initialValue = emptyList()
     )
+
+    private val recordingDetails = RecordingDetailsCache { recording ->
+        runCatching {
+            val audio = recordingAudioFile(application, checkNotNull(recording.audioFileName))
+            alignedWordCues(recording.text, NativeWordTimingFile.read(audio), recording.durationMs)
+        }.getOrDefault(emptyList())
+    }
+
+    /** Native timing files are needed only by the opened player, never by live capture or library cards. */
+    suspend fun loadRecordingDetails(recording: SavedRecording): SavedRecording = withContext(Dispatchers.IO) {
+        recordingDetails.load(recording)
+    }
 
     val allNotes: StateFlow<List<DailyNote>> = repository.observeAll().stateIn(
         scope = viewModelScope,

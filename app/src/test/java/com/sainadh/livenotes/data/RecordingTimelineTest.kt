@@ -59,4 +59,17 @@ class RecordingTimelineTest {
         cues.forEach { assertEquals(it.text, transcriptText(segments).substring(it.startChar, it.endChar)) }
         assertEquals(1_000L, cues.last().endMs)
     }
+
+    @Test fun hourLongTranscriptKeepsEveryWordAndTimingOffset() {
+        val segments = (0 until 7_200).map { index ->
+            segment(index.toLong(), "word$index ", index * 500L, (index + 1) * 500L, append = true)
+        }.reversed()
+        val text = transcriptText(segments)
+        val cues = recordingWordCues(segments)
+        assertEquals((0 until 7_200).joinToString(" ") { "word$it" } + " ", text)
+        assertEquals(7_200, cues.size)
+        assertEquals(0L, cues.first().startMs)
+        assertEquals(3_600_000L, cues.last().endMs)
+        cues.forEach { cue -> assertEquals(cue.text, text.substring(cue.startChar, cue.endChar)) }
+    }
 }

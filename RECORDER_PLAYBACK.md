@@ -22,6 +22,11 @@ Playback uses one MediaPlayer owned by the ViewModel, generation-safe preparatio
 
 ## Verification
 
+Long recordings use a bounded recent-word preview and on-demand full transcript actions.
+Archive refreshes pause during capture, and native timing loads when a recording is opened.
+See [long-meeting performance](LONG_MEETING_PERFORMANCE.md) for the changes, regression
+coverage, and remaining engine/device profiling limits.
+
 Automated coverage includes WAV sample integrity and recovery, stop/loading/inference races, queue overflow, Room upgrades, segment revisions, estimated word offsets, actual MediaPlayer playback/seek, and FileProvider isolation. Full Android build, unit tests, lint, and instrumented test results are recorded in the GitHub release notes. The Android recorder checks workflow uses an accelerated x86 emulator for framework/UI tests. Its `-PemulatorTests=true` package is separately named `com.sainadh.livenotes.emulatortest`, excludes ARM libraries, and disables shrinking so test-runner dependencies remain available; it is never distributed as a phone APK. Actual native speech/timing is covered separately by the pinned JNI host harness and real-model sample test.
 
 Real microphone quality, Bluetooth routing, speech accuracy, and performance need a physical arm64 phone. The x86 emulator cannot execute the bundled native speech libraries. The APK downloads models separately and does not bundle an AI key. Preview APKs use the workspace's existing debug signing certificate; they are installable test builds, not Play Store releases.

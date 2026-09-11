@@ -45,6 +45,7 @@ struct NativeSession {
     transcribe_model *   model   = nullptr;
     transcribe_session * session = nullptr;
     bool                 stream_active = false;
+    size_t               delivered_committed_bytes = 0;
 
     ~NativeSession() {
         if (session) {
@@ -282,9 +283,11 @@ Java_com_sainadh_livenotes_stt_NemotronTranscriber_nativeInit(
 
 /*
  * nativeFeedPcm: push one chunk of 16kHz mono float32 PCM into the active
- * stream and return the current UI-facing text snapshot as
- * "<committed_text>\u0001<tentative_text>" (0x01 is a separator Kotlin
- * splits on - avoids needing two separate JNI calls per chunk).
+ * stream and return "<new_committed_bytes>\u0001<tentative_text>".
+ * The pinned API guarantees committed text is append-only. Transfer only
+ * its new suffix so an hour of history is not converted to UTF-16 per chunk.
+ * Tentative text is always replaceable (including Moonshine's whole live
+ * hypothesis). A null result without a Java exception means no text changed.
  */
 JNIEXPORT jstring JNICALL
 Java_com_sainadh_livenotes_stt_NemotronTranscriber_nativeFeedPcm(
@@ -326,12 +329,33 @@ Java_com_sainadh_livenotes_stt_NemotronTranscriber_nativeFeedPcm(
         return nullptr;
     }
 
+    if (text.committed_text_bytes < ns->delivered_committed_bytes ||
+        text.committed_text_bytes > std::numeric_limits<size_t>::max() ||
+        text.tentative_text_bytes > std::numeric_limits<size_t>::max() ||
+        (text.committed_text_bytes != 0 && text.committed_text == nullptr) ||
+        (text.tentative_text_bytes != 0 && text.tentative_text == nullptr)) {
+        ns->stream_active = false;
+        throwJavaError(env, "Speech engine returned an invalid committed text boundary");
+        return nullptr;
+    }
+    const size_t committed_bytes = static_cast<size_t>(text.committed_text_bytes);
+    if (committed_bytes == ns->delivered_committed_bytes && !update.tentative_changed) {
+        return nullptr;
+    }
+
     try {
         std::string combined;
-        combined += (text.committed_text ? text.committed_text : "");
+        if (committed_bytes > ns->delivered_committed_bytes) {
+            combined.append(text.committed_text + ns->delivered_committed_bytes,
+                            committed_bytes - ns->delivered_committed_bytes);
+        }
         combined += '\x01';
-        combined += (text.tentative_text ? text.tentative_text : "");
-        return makeJString(env, combined.c_str());
+        if (text.tentative_text_bytes != 0) {
+            combined.append(text.tentative_text, static_cast<size_t>(text.tentative_text_bytes));
+        }
+        jstring result = makeJString(env, combined.c_str());
+        if (result != nullptr) ns->delivered_committed_bytes = committed_bytes;
+        return result;
     } catch (const std::bad_alloc &) {
         throwJavaError(env, "Unable to allocate transcript text", "java/lang/OutOfMemoryError");
         return nullptr;
@@ -467,6 +491,7 @@ Java_com_sainadh_livenotes_stt_NemotronTranscriber_nativeRestartStream(
     }
 
     ns->stream_active = true;
+    ns->delivered_committed_bytes = 0;
     return JNI_TRUE;
 }
 

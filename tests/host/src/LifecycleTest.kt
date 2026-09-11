@@ -76,7 +76,8 @@ fun main(args: Array<String>) {
     }
     try {
         when (scenario) {
-            "saved-audio", "saved-tail" -> {
+            "saved-audio", "saved-tail", "saved-no-text" -> {
+                Gate.noTextUpdates = scenario == "saved-no-text"
                 if (scenario == "saved-tail") {
                     AudioRecord.availableFrames.set(17_123)
                     Gate.blockEmptyRead = true
@@ -103,6 +104,9 @@ fun main(args: Array<String>) {
                 check(audioProgress.any { it.second == 0.5f })
                 check(updates.all { it.startMs == 0L && checkNotNull(it.endMs) <= duration })
                 check(updates.last().endMs == duration)
+                if (scenario == "saved-no-text") {
+                    check(updates.size == 1 && updates.single().status == TranscriptStatus.FINAL)
+                }
                 check(AudioRecord.starts.get() == 1 && AudioRecord.releases.get() == 1)
             }
             "stop-init", "destroy-init" -> {
@@ -274,11 +278,11 @@ fun main(args: Array<String>) {
                 fun accept(batch: List<TranscriptUpdate>) = batch.forEach { saved[it.segmentId] = it }
                 accept(assembler.update("Hello\u0001 wor"))
                 check(saved[0L]?.text == "Hello wor")
-                accept(assembler.update("Hello \u0001world"))
+                accept(assembler.update(" \u0001world"))
                 check(saved[0L] == TranscriptUpdate(0, "Hello ", TranscriptStatus.FINAL, false, true))
-                accept(assembler.update("Hello world\u0001!"))
+                accept(assembler.update("world\u0001!"))
                 check(saved[1L]?.text == "world!")
-                accept(assembler.update("Hello world \u0001again"))
+                accept(assembler.update(" \u0001again"))
                 check(saved[1L]?.text == "world ")
                 val ending = assembler.finish("Hello world again.")
                 accept(listOf(ending))
@@ -288,13 +292,32 @@ fun main(args: Array<String>) {
                 val interrupted = NativeTranscriptSegments()
                 interrupted.update("committed \u0001unfinished")
                 check(interrupted.interrupted() == TranscriptUpdate(1, "unfinished", TranscriptStatus.INTERRUPTED, true, true))
-                check(runCatching { interrupted.update("changed \u0001text") }.exceptionOrNull()?.message?.contains("changed already committed") == true)
+                check(runCatching { interrupted.update("malformed") }.isFailure)
                 check(runCatching { interrupted.finish("changed final") }.isFailure)
                 check(interrupted.interrupted().text == "unfinished")
                 val cleared = NativeTranscriptSegments()
                 cleared.update("\u0001uncertain")
                 check(cleared.update("\u0001").single().text.isEmpty())
                 check(cleared.finish("").endsUtterance)
+
+                val hour = NativeTranscriptSegments()
+                val finalWords = StringBuilder()
+                val expected = StringBuilder()
+                repeat(7_200) { index ->
+                    // Split the committed word across feeds and preserve Unicode.
+                    val wordPart = if (index % 2 == 0) "नमस्ते🙂" else "𠮷 "
+                    expected.append(wordPart)
+                    hour.update("$wordPart\u0001revisable").forEach { update ->
+                        if (update.status == TranscriptStatus.FINAL) finalWords.append(update.text)
+                    }
+                }
+                finalWords.append(hour.finish(expected.toString() + "last word.").text)
+                check(finalWords.toString() == expected.toString() + "last word.")
+
+                val moonshine = NativeTranscriptSegments()
+                moonshine.update("\u0001earlier full hypothesis")
+                check(moonshine.update("\u0001Completely revised.").single().text == "Completely revised.")
+                check(moonshine.finish("Final rewrite.").text == "Final rewrite.")
             }
             "restart" -> {
                 startAndFeed()

@@ -90,7 +90,7 @@ class NemotronTranscriber(
     }
 
     private external fun nativeInit(modelPath: String, language: String, attContextRight: Int): Long
-    private external fun nativeFeedPcm(handle: Long, pcm: FloatArray): String
+    private external fun nativeFeedPcm(handle: Long, pcm: FloatArray): String?
     private external fun nativeFinalizeStream(handle: Long): String
     private external fun nativeWordTimings(handle: Long): String
     private external fun nativeRestartStream(handle: Long, language: String, attContextRight: Int): Boolean
@@ -245,7 +245,9 @@ class NemotronTranscriber(
                 val pcm = capture.chunks.poll(20, TimeUnit.MILLISECONDS) ?: continue
                 val result = nativeFeedPcm(handle, pcm)
                 sampleClock.consume(pcm.size)
-                segments.update(result).forEach { update -> postTranscript(session, sampleClock.stamp(update)) }
+                result?.let { delta ->
+                    segments.update(delta).forEach { update -> postTranscript(session, sampleClock.stamp(update)) }
+                }
                 checkOutputLimit()
             }
         } catch (error: Throwable) {

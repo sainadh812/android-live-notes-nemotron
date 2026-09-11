@@ -4,7 +4,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 public class Gate {
     public static final CountDownLatch entered = new CountDownLatch(1), release = new CountDownLatch(1);
     public static final CountDownLatch readEntered = new CountDownLatch(1), readRelease = new CountDownLatch(1);
-    public static volatile boolean blockEmptyRead = false, truncated = false;
+    public static volatile boolean blockEmptyRead = false, truncated = false, noTextUpdates = false;
     public static volatile String truncateOperation = "";
     public static final AtomicInteger feedFrames = new AtomicInteger();
     public static final java.util.List<Integer> feedSizes = new java.util.concurrent.CopyOnWriteArrayList<>();
@@ -33,7 +33,7 @@ public class Gate {
         feedFrames.addAndGet(pcm.length);
         feedSizes.add(pcm.length);
         operation("feed", feeds);
-        return "\u0001tentative";
+        return noTextUpdates ? null : "\u0001tentative";
     }
     public static boolean restart() { operation("restart", restarts); return true; }
     public static String finish() { operation("finalize", finalizes); return "final transcript"; }

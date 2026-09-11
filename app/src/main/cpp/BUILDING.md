@@ -66,6 +66,12 @@ locale tags use an exact metadata match first, then an explicitly supported
 language subtag (for example, `en-US` becomes `en` for English-only models).
 Unsupported model families or languages fail clearly.
 
+Live JNI results contain only newly committed UTF-8 text and the current tentative
+suffix; unchanged updates return null. Kotlin consumes every PCM chunk even when
+text is unchanged. The complete committed snapshot is validated once on finalization.
+This avoids repeatedly copying all committed words into the Android UI during long
+recordings. Contract tests cover 7,200 updates, Unicode, restart, and tentative clearing.
+
 Moonshine Streaming has a finite output window (4,096 tokens in these models).
 The bridge exposes `transcribe_was_truncated`; Kotlin retains the current text
 and stops with an explicit output-limit message when that flag is set. This

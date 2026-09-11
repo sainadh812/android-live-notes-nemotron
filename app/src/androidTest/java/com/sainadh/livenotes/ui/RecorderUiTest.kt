@@ -16,6 +16,11 @@ import com.sainadh.livenotes.audio.PlaybackState
 import com.sainadh.livenotes.data.RecordingAudioStatus
 import com.sainadh.livenotes.data.SavedRecording
 import com.sainadh.livenotes.data.WordCue
+import com.sainadh.livenotes.service.CapturePhase
+import com.sainadh.livenotes.stt.LiveTranscriptBuffer
+import com.sainadh.livenotes.stt.TranscriptStatus
+import com.sainadh.livenotes.stt.TranscriptUpdate
+import org.junit.Assert.assertTrue
 import org.junit.Assert.assertEquals
 import org.junit.Rule
 import org.junit.Test
@@ -95,5 +100,31 @@ class RecorderUiTest {
         compose.onNodeWithText("Copy").assertIsNotEnabled()
         compose.onNodeWithText("Share text").assertIsNotEnabled()
         compose.onNodeWithText("Save .txt").assertIsNotEnabled()
+    }
+
+    @Test fun longMeetingPreviewKeepsFullTranscriptAccessible() {
+        val document = LiveTranscriptBuffer(120, 4)
+        var preview: LiveTranscriptBuffer.Preview? = null
+        repeat(7_200) { index ->
+            preview = document.update(TranscriptUpdate(index.toLong(), "word$index ", TranscriptStatus.FINAL,
+                appendToPrevious = true, startMs = index * 500L, endMs = (index + 1L) * 500))
+        }
+        val recent = requireNotNull(preview)
+        var copied = ""
+        var opened = ""
+        compose.setContent {
+            LiveNotesTheme {
+                LiveTranscriptPanel(CapturePhase.RECORDING, recent.text, recent.segments,
+                    onCopy = { copied = document.fullText() }, onShare = {}, onExport = {},
+                    hasEarlierText = recent.hasEarlierText, onOpenFull = { opened = document.fullText() })
+            }
+        }
+        compose.onNodeWithText("View full transcript").performClick()
+        compose.onNodeWithText("Copy").performClick()
+        compose.runOnIdle {
+            assertTrue(copied.startsWith("word0 ") && copied.endsWith("word7199 "))
+            assertEquals(copied, opened)
+        }
+        saveTestScreenshot(compose.onRoot().captureToImage().asAndroidBitmap(), "long-meeting-preview.png")
     }
 }

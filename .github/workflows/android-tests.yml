@@ -1,7 +1,7 @@
 name: Android recorder checks
 on:
   push:
-    branches: [main, release/v1.1.0-recorder-playback]
+    branches: [main, release/v1.1.0-recorder-playback, fix/long-meeting-performance]
   workflow_dispatch:
 
 permissions:
@@ -60,6 +60,8 @@ jobs:
           adb shell settings put global animator_duration_scale 0
       - name: Run Android playback, migration, and UI tests
         run: ./gradlew :app:connectedDebugAndroidTest -PemulatorTests=true --no-daemon --console=plain
+      - name: Verify phone APK packaging
+        run: ./gradlew :app:assembleDebug -PpreviewBuild=true --no-daemon --console=plain
       - name: Collect screenshots and device logs
         if: always()
         run: |

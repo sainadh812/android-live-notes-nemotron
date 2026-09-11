@@ -105,12 +105,22 @@ int main(int argc, char ** argv) {
         for (size_t offset = 0; offset < audio.size(); offset += 8000) {
             std::vector<float> chunk(audio.begin() + offset, audio.begin() + std::min(audio.size(), offset + 8000));
             const auto feedStart = std::chrono::steady_clock::now();
-            const auto text = takeString(Java_com_sainadh_livenotes_stt_NemotronTranscriber_nativeFeedPcm(
-                &env, nullptr, handle, reinterpret_cast<jfloatArray>(&chunk)));
+            auto delta = Java_com_sainadh_livenotes_stt_NemotronTranscriber_nativeFeedPcm(
+                &env, nullptr, handle, reinterpret_cast<jfloatArray>(&chunk));
             feedDurations.push_back(std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::steady_clock::now() - feedStart).count());
-            const auto next = text.substr(0, text.find('\x01'));
-            if (next.compare(0, committed.size(), committed) != 0) throw std::runtime_error("Committed prefix changed");
-            committed = next;
+            checkJava();
+            if (delta != nullptr) {
+                const auto text = takeString(delta);
+                const auto separator = text.find('\x01');
+                if (separator == std::string::npos) throw std::runtime_error("Delta has no tentative separator");
+                committed.append(text, 0, separator);
+            }
+            transcribe_stream_text current;
+            transcribe_stream_text_init(&current);
+            if (transcribe_stream_get_text(native->session, &current) != TRANSCRIBE_OK ||
+                committed != current.committed_text) {
+                throw std::runtime_error("JNI deltas did not reconstruct engine committed text");
+            }
             if (Java_com_sainadh_livenotes_stt_NemotronTranscriber_nativeWasTruncated(&env, nullptr, handle)) {
                 throw std::runtime_error("Sample was truncated during feed");
             }

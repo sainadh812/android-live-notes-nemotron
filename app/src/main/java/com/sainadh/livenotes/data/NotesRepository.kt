@@ -48,6 +48,10 @@ class NotesRepository(
         segmentDao.observeAll(), transcriptChunkDao.observeAll(), recordingDao.observeAll()
     ) { segments, legacy, recordings -> savedRecordings(segments, legacy, recordings) }.flowOn(Dispatchers.Default)
 
+    /** Keep the existing archive snapshot during capture; do not reread history for every live word. */
+    fun observeSavedRecordings(captureActive: Flow<Boolean>): Flow<List<SavedRecording>> =
+        observeWhenIdle(captureActive) { observeSavedRecordings() }
+
     suspend fun beginRecording(recordingId: String, timestampMs: Long) {
         recordingDao.insert(RecordingEntity(
             recordingId = recordingId,

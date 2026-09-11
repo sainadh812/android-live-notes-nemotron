@@ -168,11 +168,11 @@ fun RecorderHero(
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-fun TextActions(text: String, onCopy: () -> Unit, onShare: () -> Unit, onExport: (() -> Unit)? = null) {
+fun TextActions(text: String, onCopy: () -> Unit, onShare: () -> Unit, onExport: (() -> Unit)? = null, enabled: Boolean = text.isNotBlank()) {
     FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        OutlinedButton(onClick = onCopy, enabled = text.isNotBlank(), modifier = Modifier.heightIn(min = 48.dp)) { Text("Copy") }
-        OutlinedButton(onClick = onShare, enabled = text.isNotBlank(), modifier = Modifier.heightIn(min = 48.dp)) { Text("Share text") }
-        if (onExport != null) TextButton(onClick = onExport, enabled = text.isNotBlank(), modifier = Modifier.heightIn(min = 48.dp)) { Text("Save .txt") }
+        OutlinedButton(onClick = onCopy, enabled = enabled, modifier = Modifier.heightIn(min = 48.dp)) { Text("Copy") }
+        OutlinedButton(onClick = onShare, enabled = enabled, modifier = Modifier.heightIn(min = 48.dp)) { Text("Share text") }
+        if (onExport != null) TextButton(onClick = onExport, enabled = enabled, modifier = Modifier.heightIn(min = 48.dp)) { Text("Save .txt") }
     }
 }
 
@@ -183,7 +183,9 @@ fun LiveTranscriptPanel(
     segments: List<TranscriptUpdate>,
     onCopy: () -> Unit,
     onShare: () -> Unit,
-    onExport: () -> Unit
+    onExport: () -> Unit,
+    hasEarlierText: Boolean = false,
+    onOpenFull: () -> Unit = {}
 ) {
     val listState = rememberLazyListState()
     val paragraphs = remember(transcript) { transcriptParagraphs(transcript) }
@@ -240,7 +242,12 @@ fun LiveTranscriptPanel(
                 }
             }
         }
-        TextActions(transcript, onCopy, onShare, onExport)
+        if (hasEarlierText) {
+            Text("Showing recent words. Copy, share, and save include the full transcript.",
+                style = MaterialTheme.typography.bodySmall, color = Gray)
+            TextButton(onClick = onOpenFull, modifier = Modifier.heightIn(min = 48.dp)) { Text("View full transcript") }
+        }
+        TextActions(transcript, onCopy, onShare, onExport, enabled = hasEarlierText || transcript.isNotBlank())
     }
 }
 
@@ -271,6 +278,33 @@ fun RecordingLibraryCard(recording: SavedRecording, isPlaying: Boolean, playback
                 }
             }
             TextButton(onClick = onOpen, modifier = Modifier.heightIn(min = 48.dp)) { Text("Open recording") }
+        }
+    }
+}
+
+/** Full history is materialized only when requested, so incoming words cannot repeatedly lay it out. */
+@Composable
+fun TranscriptSnapshotScreen(
+    text: String, captureActive: Boolean, onBack: () -> Unit, onRefresh: () -> Unit,
+    onCopy: () -> Unit, onShare: () -> Unit, onExport: () -> Unit
+) {
+    val paragraphs = remember(text) { transcriptParagraphs(text) }
+    Scaffold(containerColor = Pale, topBar = {
+        Row(Modifier.fillMaxWidth().padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
+            TextButton(onClick = onBack) { Text("‹  Back") }
+            Spacer(Modifier.weight(1f))
+            TextButton(onClick = onRefresh) { Text("Refresh transcript") }
+        }
+    }) { padding ->
+        LazyColumn(Modifier.fillMaxSize().padding(padding), contentPadding = PaddingValues(20.dp),
+            verticalArrangement = Arrangement.spacedBy(18.dp)) {
+            item { Text("Full transcript", style = MaterialTheme.typography.headlineLarge) }
+            item { Text(if (captureActive) "Recording continues. Refresh to include the newest words, or go back to follow live."
+                else "Transcript snapshot. Refresh to include the latest words.", style = MaterialTheme.typography.bodySmall, color = Gray) }
+            item { TextActions(text, onCopy, onShare, onExport) }
+            itemsIndexed(paragraphs, key = { _, paragraph -> paragraph.start }) { _, paragraph ->
+                SelectionContainer { Text(paragraph.text, style = MaterialTheme.typography.bodyLarge) }
+            }
         }
     }
 }

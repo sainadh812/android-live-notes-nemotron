@@ -71,7 +71,15 @@ private fun transcriptLayout(segments: List<RecordingSegment>): TranscriptLayout
     return TranscriptLayout(text, spans)
 }
 
-fun transcriptText(segments: List<RecordingSegment>): String = transcriptLayout(segments).text
+/** Text-only callers do not need per-character timing weights or span allocations. */
+fun transcriptText(segments: List<RecordingSegment>): String = buildString {
+    segments.sortedBy { it.segmentId }.forEach { segment ->
+        if (segment.text.isNotEmpty()) {
+            if (isNotEmpty() && !segment.appendToPrevious) append('\n')
+            append(segment.text)
+        }
+    }
+}
 
 /**
  * Distributes each segment's duration by visible character count. Estimates retain silence between

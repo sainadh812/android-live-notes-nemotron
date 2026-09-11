@@ -7,7 +7,7 @@ model download, emulator, or network connection is needed once Gradle exists.
 
 The harness compiles the actual `NemotronTranscriber.kt`, native transcript
 segment assembly, and shared update contract with small Android and JNI stubs.
-Its 29 deterministic lifecycle scenarios and standalone WAV/sample-clock checks cover:
+Its 30 deterministic lifecycle scenarios and standalone WAV/sample-clock checks cover:
 
 - Cancellation during model initialization and inference, duplicate starts/stops,
   model reuse, native restart/init/feed/finalize failures, and microphone errors.
@@ -23,7 +23,9 @@ Its 29 deterministic lifecycle scenarios and standalone WAV/sample-clock checks 
 - Explicit output-window truncation after feed or finalize, retaining returned
   text before stopping instead of silently declaring the recording complete.
 - Stable complete-word segments, one replaceable tentative tail, exact whitespace
-  and punctuation, empty-tail clearing, and rejection of committed-prefix changes.
+  and punctuation, empty-tail clearing, and final committed-prefix integrity.
+  A 7,200-update regression reconstructs an hour-equivalent sequence of deltas exactly;
+  unchanged null JNI results still consume PCM and preserve sample timing and saved audio.
 - Finalized WAV files containing every actual PCM read, including incomplete tails,
   audio beyond an overflowing inference queue, and cancellation during inference.
   Failed microphone starts never publish an empty recording.

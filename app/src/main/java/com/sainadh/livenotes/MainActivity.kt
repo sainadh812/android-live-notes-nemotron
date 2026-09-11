@@ -60,6 +60,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.Typography
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.rememberCoroutineScope
@@ -103,6 +104,7 @@ import com.sainadh.livenotes.ui.LiveTranscriptPanel
 import com.sainadh.livenotes.ui.RecordingLibraryCard
 import com.sainadh.livenotes.ui.RecordingDetailScreen
 import com.sainadh.livenotes.ui.TextActions
+import com.sainadh.livenotes.ui.TranscriptSnapshotScreen
 import com.sainadh.livenotes.ui.recordingTime
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -205,8 +207,11 @@ private fun LiveNotesScreen(viewModel: MainViewModel, activityLifecycle: Lifecyc
     val durationMs by ServiceStateTracker.durationMs.collectAsStateWithLifecycle(lifecycle = activityLifecycle)
     val audioLevel by ServiceStateTracker.audioLevel.collectAsStateWithLifecycle(lifecycle = activityLifecycle)
     val liveSegments by ServiceStateTracker.liveSegments.collectAsStateWithLifecycle(lifecycle = activityLifecycle)
+    val hasEarlierTranscript by ServiceStateTracker.hasEarlierTranscript.collectAsStateWithLifecycle(lifecycle = activityLifecycle)
     val audioNotice by ServiceStateTracker.audioNotice.collectAsStateWithLifecycle(lifecycle = activityLifecycle)
     var openedRecordingId by rememberSaveable { mutableStateOf<String?>(null) }
+    var openedTranscript by remember { mutableStateOf<String?>(null) }
+    var transcriptSource by remember { mutableStateOf<com.sainadh.livenotes.stt.LiveTranscriptBuffer?>(null) }
     // Only a short cache filename enters saved state; a long meeting must not overflow its Bundle.
     var exportDraftName by rememberSaveable { mutableStateOf<String?>(null) }
     val coroutineScope = rememberCoroutineScope()
@@ -243,6 +248,21 @@ private fun LiveNotesScreen(viewModel: MainViewModel, activityLifecycle: Lifecyc
             }.onFailure {
                 Toast.makeText(context, "Could not prepare this text file. Check device storage.", Toast.LENGTH_LONG).show()
             }
+        }
+    }
+    fun withFullTranscript(action: (String) -> Unit) {
+        val document = ServiceStateTracker.transcriptDocument
+        coroutineScope.launch {
+            val text = withContext(Dispatchers.Default) { document.fullText() }
+            action(text)
+        }
+    }
+    fun openFullTranscript() {
+        val document = ServiceStateTracker.transcriptDocument
+        coroutineScope.launch {
+            val text = withContext(Dispatchers.Default) { document.fullText() }
+            transcriptSource = document
+            openedTranscript = text
         }
     }
     val latestTranscript by viewModel.latestTranscript.collectAsStateWithLifecycle(lifecycle = activityLifecycle)
@@ -282,7 +302,32 @@ private fun LiveNotesScreen(viewModel: MainViewModel, activityLifecycle: Lifecyc
         if (permissions.isEmpty()) viewModel.startListening() else permissionLauncher.launch(permissions)
     }
 
-    val openedRecording = savedRecordings.firstOrNull { it.recordingId == openedRecordingId }
+    val recordingEntry = remember(savedRecordings, openedRecordingId) { savedRecordings.firstOrNull { it.recordingId == openedRecordingId } }
+    var recordingDetails by remember(recordingEntry) { mutableStateOf<SavedRecording?>(null) }
+    LaunchedEffect(recordingEntry) {
+        recordingDetails = recordingEntry?.let { viewModel.loadRecordingDetails(it) }
+    }
+    // Never reuse the previous recording's words while an asynchronous detail load completes.
+    val openedRecording = recordingDetails?.takeIf { it.recordingId == recordingEntry?.recordingId } ?: recordingEntry
+    val fullTranscript = openedTranscript
+    if (fullTranscript != null) {
+        BackHandler { openedTranscript = null; transcriptSource = null }
+        Box(Modifier.fillMaxSize().background(Paper).safeDrawingPadding()) {
+            TranscriptSnapshotScreen(fullTranscript, capturePhase != CapturePhase.IDLE,
+                onBack = { openedTranscript = null; transcriptSource = null },
+                onRefresh = {
+                    val document = transcriptSource
+                    if (document != null) coroutineScope.launch {
+                        val refreshed = withContext(Dispatchers.Default) { document.fullText() }
+                        if (transcriptSource === document && openedTranscript != null) openedTranscript = refreshed
+                    }
+                },
+                onCopy = { RecordingSharing.copyText(context, fullTranscript, "Transcript") },
+                onShare = { RecordingSharing.shareText(context, fullTranscript, "Transcript") },
+                onExport = { export(fullTranscript, "transcript-${LocalDate.now()}.txt") })
+        }
+        return
+    }
     if (openedRecording != null) {
         BackHandler { openedRecordingId = null }
         Box(Modifier.fillMaxSize().background(Paper).safeDrawingPadding(), contentAlignment = Alignment.TopCenter) {
@@ -399,9 +444,10 @@ private fun LiveNotesScreen(viewModel: MainViewModel, activityLifecycle: Lifecyc
                     }
                     item {
                         LiveTranscriptPanel(capturePhase, latestTranscript, liveSegments,
-                            onCopy = { RecordingSharing.copyText(context, latestTranscript, "Transcript") },
-                            onShare = { RecordingSharing.shareText(context, latestTranscript, "Live transcript") },
-                            onExport = { export(latestTranscript, "transcript-${LocalDate.now()}.txt") })
+                            onCopy = { withFullTranscript { RecordingSharing.copyText(context, it, "Transcript") } },
+                            onShare = { withFullTranscript { RecordingSharing.shareText(context, it, "Live transcript") } },
+                            onExport = { withFullTranscript { export(it, "transcript-${LocalDate.now()}.txt") } },
+                            hasEarlierText = hasEarlierTranscript, onOpenFull = ::openFullTranscript)
                     }
                     if (capturePhase == CapturePhase.IDLE && savedRecordings.isNotEmpty()) {
                         item {
@@ -423,6 +469,12 @@ private fun LiveNotesScreen(viewModel: MainViewModel, activityLifecycle: Lifecyc
                 }
                 AppScreen.NOTES -> {
                     item { PageHeading("Your library", "Replay the conversation. Rediscover the details.") }
+                    if (capturePhase != CapturePhase.IDLE) {
+                        item {
+                            AttentionCard("Recording in progress", "Your new recording will appear here after saving. Follow the newest words on the Record screen.",
+                                "View current transcript", ::openFullTranscript)
+                        }
+                    }
                     if (!summaryError.isNullOrBlank()) {
                         item { AttentionCard("Summary needs attention", summaryError!!, "Retry summary", viewModel::retrySummary) }
                     }
