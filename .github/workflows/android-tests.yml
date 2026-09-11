@@ -65,7 +65,6 @@ jobs:
         run: |
           mkdir -p device-evidence
           timeout 20s adb logcat -d > device-evidence/logcat.txt || true
-          timeout 20s adb exec-out run-as com.sainadh.livenotes.emulatortest cat files/ui-playback.png > device-evidence/playback.png || true
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         if: always()
         with:
@@ -73,6 +72,7 @@ jobs:
           path: |
             app/build/reports/
             app/build/outputs/androidTest-results/
+            app/build/outputs/connected_android_test_additional_output/
             device-evidence/
             emulator.log
           retention-days: 14

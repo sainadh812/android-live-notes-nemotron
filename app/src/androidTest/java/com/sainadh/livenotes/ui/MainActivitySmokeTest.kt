@@ -1,8 +1,11 @@
 package com.sainadh.livenotes.ui
 
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.graphics.asAndroidBitmap
+import androidx.compose.ui.test.captureToImage
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.test.performClick
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.sainadh.livenotes.MainActivity
@@ -17,6 +20,7 @@ class MainActivitySmokeTest {
 
     @Test fun recorderAndLibraryOpenWithoutCloudCredentials() {
         compose.onNodeWithText("Start recording").assertIsDisplayed()
+        saveTestScreenshot(compose.onRoot().captureToImage().asAndroidBitmap(), "recorder.png")
         compose.onNodeWithText("Notes").performClick()
         compose.onNodeWithText("Your library").assertIsDisplayed()
         compose.onNodeWithText("Settings").performClick()

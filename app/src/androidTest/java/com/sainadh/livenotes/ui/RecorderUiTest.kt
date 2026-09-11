@@ -1,6 +1,5 @@
 package com.sainadh.livenotes.ui
 
-import android.graphics.Bitmap
 import androidx.compose.ui.graphics.asAndroidBitmap
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsNotEnabled
@@ -12,7 +11,6 @@ import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
 import androidx.test.ext.junit.runners.AndroidJUnit4
-import androidx.test.platform.app.InstrumentationRegistry
 import com.sainadh.livenotes.LiveNotesTheme
 import com.sainadh.livenotes.audio.PlaybackState
 import com.sainadh.livenotes.data.RecordingAudioStatus
@@ -22,7 +20,6 @@ import org.junit.Assert.assertEquals
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
-import java.io.File
 
 @RunWith(AndroidJUnit4::class)
 class RecorderUiTest {
@@ -55,8 +52,7 @@ class RecorderUiTest {
         compose.runOnIdle { assertEquals(1_000L, seekPosition) }
         compose.onNodeWithContentDescription("Play recording").assertIsDisplayed()
         val image = compose.onRoot().captureToImage().asAndroidBitmap()
-        val file = File(InstrumentationRegistry.getInstrumentation().targetContext.filesDir, "ui-playback.png")
-        file.outputStream().use { image.compress(Bitmap.CompressFormat.PNG, 100, it) }
+        saveTestScreenshot(image, "playback.png")
     }
 
     @Test fun oldTranscriptKeepsCopyAndShareWithoutPlayer() {
