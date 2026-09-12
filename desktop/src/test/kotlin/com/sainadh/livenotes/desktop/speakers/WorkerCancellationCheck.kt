@@ -12,9 +12,12 @@ import java.security.MessageDigest
 /** Windows CI integration check using the actual packaged ONNX worker and real speech. */
 object WorkerCancellationCheck {
     @JvmStatic fun main(args: Array<String>) = runBlocking {
-        require(args.size == 4) { "Expected worker directory, models directory, fixture WAV, evidence directory" }
+        require(args.size == 4) { "Expected worker directory, smoke evidence directory, fixture WAV, cancellation evidence directory" }
         val worker = Path.of(args[0]).toAbsolutePath()
-        val models = Path.of(args[1]).toAbsolutePath()
+        // Resolve inside the JVM: the Windows Java launcher can lose Unicode in command-line
+        // arguments under its active code page. ProcessBuilder must still pass this actual
+        // Unicode path to the worker, matching a non-ASCII Windows user profile.
+        val models = Path.of(args[1]).toAbsolutePath().resolve("speaker models \u4f1a\u8bae")
         val wav = Path.of(args[2]).toAbsolutePath()
         val evidence = Path.of(args[3]).toAbsolutePath()
         Files.createDirectories(evidence)

@@ -4,6 +4,8 @@ A Windows desktop version is available in [desktop/](desktop/README.md), with
 local recording/transcription, timed playback, and editable offline speaker
 labels. The Android build and its existing recording library are preserved.
 
+[Download Windows 1.0.0 Preview](https://github.com/sainadh812/android-live-notes-nemotron/releases/tag/windows-v1.0.0) · [Windows setup and features](desktop/README.md)
+
 Android app in Kotlin for live speech transcription, daily notes, and AI summaries with action items. Supports Android 8+ on arm64 devices.
 
 [Download Preview 1.1.0 APK](https://github.com/sainadh812/android-live-notes-nemotron/releases/download/v1.1.0-recorder-playback/android-live-notes-nemotron-v1.1.0-preview.apk) · [Model comparison and validation](SPEECH_MODELS.md)

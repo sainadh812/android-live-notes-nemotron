@@ -7,6 +7,7 @@ recording libraries are separate.
 
 ## Install and record
 
+Download [Windows 1.0.0 Preview](https://github.com/sainadh812/android-live-notes-nemotron/releases/tag/windows-v1.0.0).
 Use the Windows x64 EXE installer, or extract the portable ZIP and run
 `LiveMeetingNotes.exe` inside its folder. The package includes its Java runtime,
 native speech engine, and speaker worker; Java and Python installations are not
@@ -131,7 +132,8 @@ protocol, cancellation, and model verification.
 [Windows CI](../.github/workflows/windows-desktop.yml) compiles and tests the
 desktop app, exercises real speech and speaker models, packages both installers
 and the portable application, installs the MSI, and launches the installed app
-to verify startup, database initialization, rendering, and shutdown. Reports,
+to verify startup, database initialization, bundled speech DLL loading, the
+bundled speaker worker, rendering, and shutdown. Reports,
 screenshots, and native-model results are retained as workflow artifacts.
 
 Tests cover an hour's synthetic transcript update count, persistence/recovery,

@@ -54,7 +54,9 @@ tasks.register<JavaExec>("speechSmoke") {
     mainClass.set("com.sainadh.livenotes.desktop.stt.SpeechFileCli")
     systemProperty("livenotes.native.dir", project.file("resources/windows-x64/native").absolutePath)
     doFirst {
-        args(providers.gradleProperty("speechModel").get(), providers.gradleProperty("speechWav").get())
+        val fixtures = providers.gradleProperty("speechFixtures").orNull
+        if (fixtures != null) args("--fixtures", fixtures)
+        else args(providers.gradleProperty("speechModel").get(), providers.gradleProperty("speechWav").get())
     }
 }
 
@@ -63,7 +65,7 @@ tasks.register<JavaExec>("speakerCancellationCheck") {
     classpath = sourceSets.test.get().runtimeClasspath
     mainClass.set("com.sainadh.livenotes.desktop.speakers.WorkerCancellationCheck")
     args(project.file("resources/windows-x64/speaker-worker").absolutePath,
-        project.file("build/speaker-evidence/speaker models 会议").absolutePath,
+        project.file("build/speaker-evidence").absolutePath,
         project.file("build/speaker-evidence/0-four-speakers-zh.wav").absolutePath,
         project.file("build/speaker-evidence/cancellation").absolutePath)
 }

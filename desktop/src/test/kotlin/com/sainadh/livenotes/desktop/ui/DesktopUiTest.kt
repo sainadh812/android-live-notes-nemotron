@@ -72,6 +72,17 @@ class DesktopUiTest {
         assertEquals("", compose.onNodeWithTag("api-key-field").fetchSemanticsNode().config[SemanticsProperties.EditableText].text)
     }
 
+    @Test fun aiSettingsCannotBeChangedDuringCapture() {
+        val actions = TestActions()
+        show(AppState(capture = CaptureView(phase = CapturePhase.RECORDING), apiKeySaved = true), actions)
+        compose.onNodeWithTag("nav-settings").performClick()
+        compose.onNodeWithTag("settings-page").performScrollToNode(hasTestTag("api-key-field"))
+        compose.onNodeWithTag("api-key-field").assertIsNotEnabled()
+        compose.onNodeWithText("Save AI settings").assertIsNotEnabled()
+        compose.onNodeWithContentDescription("Automatically create summaries").assertIsNotEnabled()
+        assertNull(actions.key)
+    }
+
     private fun screenshot(name: String) {
         compose.waitForIdle()
         val image = compose.onRoot().captureToImage().toPixelMap()

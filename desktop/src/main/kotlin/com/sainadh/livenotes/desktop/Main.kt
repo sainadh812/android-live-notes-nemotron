@@ -23,6 +23,7 @@ import androidx.compose.ui.window.application
 import androidx.compose.ui.window.rememberWindowState
 import com.sainadh.livenotes.desktop.data.AppPaths
 import com.sainadh.livenotes.desktop.data.SingleInstance
+import com.sainadh.livenotes.desktop.stt.InstalledNativeChecks
 import com.sainadh.livenotes.desktop.ui.DesktopApp
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
@@ -90,10 +91,11 @@ fun main(args: Array<String>) {
                     try {
                         withTimeout(60_000) { while (controller.state.value.initializing) delay(100) }
                         check(controller.state.value.error == null) { controller.state.value.error.orEmpty() }
+                        withContext(Dispatchers.IO) { InstalledNativeChecks.verify(smoke) }
                         delay(2_000)
                         val bounds = Rectangle(window.locationOnScreen, window.size)
                         withContext(Dispatchers.IO) { ImageIO.write(Robot().createScreenCapture(bounds), "png", File(smoke, "installed-app.png")) }
-                        File(smoke, "startup-ok.txt").writeText("Windows app initialized its SQLite library and rendered the recorder.\n")
+                        File(smoke, "startup-ok.txt").writeText("Windows app initialized its SQLite library, loaded all five installed speech DLLs, passed the installed speaker worker self-test, and rendered the recorder.\n")
                     } catch (error: Throwable) { File(smoke, "startup-error.txt").writeText(error.stackTraceToString()) }
                     finally { closeWindow() }
                 }

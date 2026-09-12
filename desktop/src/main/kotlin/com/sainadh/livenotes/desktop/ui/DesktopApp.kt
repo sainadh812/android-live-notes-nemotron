@@ -226,7 +226,7 @@ private fun RecordPage(state: AppState, actions: DesktopActions, onSettings: () 
                         }
                     }
                     if (capture.phase == CapturePhase.PREPARING || capture.phase == CapturePhase.SAVING) LinearProgressIndicator(Modifier.fillMaxWidth(), color = Accent, trackColor = Teal)
-                    if (!ready && !capture.active) TextButton(onClick = onSettings, colors = ButtonDefaults.textButtonColors(contentColor = Accent)) { Text("Download a speech model to get started →") }
+                    if (!ready && !capture.active) TextButton(onClick = onSettings, colors = ButtonDefaults.textButtonColors(contentColor = Accent)) { Text("Choose or download a speech model in Settings →") }
                     if (busyWithSpeakers && !capture.active) Text("Finish or cancel speaker processing before starting another recording.", color = Mint, style = MaterialTheme.typography.bodySmall)
                 }
             }
@@ -413,7 +413,8 @@ private fun RecordingPage(state: AppState, actions: DesktopActions, onRename: (R
                         Text("A voice, then a name.", fontSize = 23.sp, fontWeight = FontWeight.SemiBold)
                         Text("Speakers are detected automatically. Add names you know, or correct a turn from the transcript. Names are your labels; voices do not reveal someone’s identity.", color = Muted)
                         Text(document.speakerStatus, color = Teal, style = MaterialTheme.typography.labelLarge)
-                        if (state.speakerJob.active || state.speakerJob.installing) SpeakerProgress(state.speakerJob, actions)
+                        if (!entry.hasAudio) Text("Speaker identification needs saved audio. This recording contains text only.", color = Muted, style = MaterialTheme.typography.bodySmall)
+                        else if (state.speakerJob.active || state.speakerJob.installing) SpeakerProgress(state.speakerJob, actions)
                         else if (state.speakerJob.modelsInstalled) Button(onClick = { analyzeDialog = true }, enabled = canAnalyze) { Text(if (document.speakers.isEmpty()) "Identify speakers" else "Analyze speakers again") }
                         else OutlinedButton(onClick = onSettings) { Text("Set up speaker identification") }
                         Text("Runs after recording on this computer. Automatic count; overlapping or brief speech can need correction.", color = Muted, style = MaterialTheme.typography.bodySmall)
@@ -437,7 +438,8 @@ private fun RecordingPage(state: AppState, actions: DesktopActions, onRename: (R
                         Button(onClick = { actions.summarize(entry.id) }, enabled = document.text.isNotBlank() && state.apiKeySaved && !state.summaryBusy && !state.capture.active) {
                             Text(if (state.summaryBusy) "Creating summary…" else if (document.summary.isBlank()) "Create summary" else "Refresh summary")
                         }
-                        if (!state.apiKeySaved) TextButton(onClick = onSettings) { Text("Add an AI key in Settings") }
+                        if (document.text.isBlank()) Text("There are no transcribed words to summarize in this recording.", color = Muted, style = MaterialTheme.typography.bodySmall)
+                        else if (!state.apiKeySaved) TextButton(onClick = onSettings) { Text("Add an AI key in Settings") }
                     }
                 }
                 if (document.summary.isNotBlank() || document.actionItems.isNotEmpty()) item {
@@ -557,6 +559,7 @@ private fun PlayerBar(position: Long, duration: Long, playing: Boolean, speed: F
 private fun SettingsPage(state: AppState, actions: DesktopActions, onRemove: (SpeechModel) -> Unit, onDeleteKey: () -> Unit) {
     val settings = state.settings
     val busy = state.capture.active || state.speakerJob.active || state.speakerJob.installing
+    val canEditAi = !state.capture.active && !state.summaryBusy && !state.connectionBusy
     var key by remember { mutableStateOf("") }
     var summaryModel by remember(settings.providerId, settings.summaryModel) { mutableStateOf(settings.summaryModel) }
     val provider = LlmProvider.entries.firstOrNull { it.name == settings.providerId } ?: LlmProvider.OPENAI
@@ -614,20 +617,21 @@ private fun SettingsPage(state: AppState, actions: DesktopActions, onRemove: (Sp
             CardSection {
                 SectionHeading(Icons.Default.AutoAwesome, "Optional AI summaries")
                 Text("Summaries send transcript text to your selected provider using your API key. The provider may charge for usage. Audio recording and local transcription do not need a key.", color = Muted)
-                ChoicePicker("AI provider", provider.name, LlmProvider.entries.map { it.name to it.displayName }, enabled = !state.summaryBusy && !state.connectionBusy,
+                if (state.capture.active) Text("Finish recording before changing AI settings.", color = Teal, style = MaterialTheme.typography.labelLarge)
+                ChoicePicker("AI provider", provider.name, LlmProvider.entries.map { it.name to it.displayName }, enabled = canEditAi,
                     onSelect = { id -> key = ""; actions.updateSettings(settings.copy(providerId = id, summaryModel = "", autoSummaries = false)) })
-                OutlinedTextField(summaryModel, { summaryModel = it }, label = { Text("Summary model") }, placeholder = { Text(provider.defaultModel) }, singleLine = true, modifier = Modifier.fillMaxWidth(), enabled = !state.summaryBusy && !state.connectionBusy)
+                OutlinedTextField(summaryModel, { summaryModel = it }, label = { Text("Summary model") }, placeholder = { Text(provider.defaultModel) }, singleLine = true, modifier = Modifier.fillMaxWidth(), enabled = canEditAi)
                 OutlinedTextField(key, { key = it }, label = { Text(if (state.apiKeySaved) "Replace saved API key" else "API key") },
-                    visualTransformation = PasswordVisualTransformation(), singleLine = true, modifier = Modifier.fillMaxWidth().testTag("api-key-field"), enabled = !state.summaryBusy && !state.connectionBusy)
+                    visualTransformation = PasswordVisualTransformation(), singleLine = true, modifier = Modifier.fillMaxWidth().testTag("api-key-field"), enabled = canEditAi)
                 Text(if (state.apiKeySaved) "A key is saved locally. Leave the field blank to keep it." else "No key saved. Enter a key only if you want cloud summaries.", color = Muted, style = MaterialTheme.typography.bodySmall)
                 FlowRow(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Button(onClick = { actions.updateSettings(settings.copy(summaryModel = summaryModel.trim())); if (key.isNotBlank()) actions.saveApiKey(key.trim()); key = "" }, enabled = !state.summaryBusy && !state.connectionBusy) { Text("Save AI settings") }
-                    OutlinedButton(onClick = actions::testConnection, enabled = state.apiKeySaved && !state.connectionBusy && !state.summaryBusy) { Text(if (state.connectionBusy) "Testing…" else "Test saved connection") }
-                    if (state.apiKeySaved) TextButton(onClick = onDeleteKey, enabled = !state.summaryBusy && !state.connectionBusy) { Text("Remove key") }
+                    Button(onClick = { actions.updateSettings(settings.copy(summaryModel = summaryModel.trim())); if (key.isNotBlank()) actions.saveApiKey(key.trim()); key = "" }, enabled = canEditAi) { Text("Save AI settings") }
+                    OutlinedButton(onClick = actions::testConnection, enabled = state.apiKeySaved && canEditAi) { Text(if (state.connectionBusy) "Testing…" else "Test saved connection") }
+                    if (state.apiKeySaved) TextButton(onClick = onDeleteKey, enabled = canEditAi) { Text("Remove key") }
                 }
                 if (state.connectionBusy) LinearProgressIndicator(Modifier.fillMaxWidth())
                 ToggleRow("Automatically create summaries", "Opt in to send transcript text to ${provider.displayName} as your meeting progresses.", settings.autoSummaries,
-                    enabled = state.apiKeySaved && !state.summaryBusy) { actions.updateSettings(settings.copy(autoSummaries = it)) }
+                    enabled = state.apiKeySaved && canEditAi) { actions.updateSettings(settings.copy(autoSummaries = it)) }
             }
         }
         item { Text("Models and notes are stored separately. Removing a model keeps your recordings. Save an audio or transcript file from the library to share it outside this app.", color = Muted, style = MaterialTheme.typography.bodySmall) }

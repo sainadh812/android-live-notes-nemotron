@@ -55,8 +55,16 @@ object FileTranscriber {
 /** Run with -Dlivenotes.native.dir=... and arguments model.gguf recording.wav. */
 object SpeechFileCli {
     @JvmStatic fun main(args: Array<String>) {
-        require(args.size in 2..3) { "Usage: SpeechFileCli model.gguf recording.wav [language]" }
-        val result = FileTranscriber.transcribe(File(args[0]), File(args[1]), args.getOrElse(2) { "en-US" })
+        require(args.size in 2..3) { "Usage: SpeechFileCli model.gguf recording.wav [language] or --fixtures directory" }
+        // Resolve the Unicode fixture filename inside Java: older Windows Java
+        // launchers can lose non-ANSI characters passed through command-line args.
+        val (model, wav) = if (args[0] == "--fixtures") {
+            val directory = File(args[1])
+            val models = directory.listFiles { file -> file.extension == "gguf" }.orEmpty()
+            require(models.size == 1) { "Expected exactly one GGUF speech fixture" }
+            models.single() to File(directory, "jfk.wav")
+        } else File(args[0]) to File(args[1])
+        val result = FileTranscriber.transcribe(model, wav, args.getOrElse(2) { "en-US" })
         println("duration_ms=${result.durationMs}")
         println("timed_words=${result.wordTiming?.let { NativeWordTimingFile.parse(it).size } ?: 0}")
         println(result.text)

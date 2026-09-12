@@ -53,9 +53,8 @@ jobs:
         run: |
           python desktop/scripts/prepare-speech-smoke.py desktop/build/speech-evidence
           if ($LASTEXITCODE -ne 0) { throw 'Speech fixture preparation failed' }
-          $model = (Get-ChildItem desktop/build/speech-evidence -Filter *.gguf).FullName
-          $wav = (Resolve-Path desktop/build/speech-evidence/jfk.wav).Path
-          ./gradlew.bat -p desktop speechSmoke "-PspeechModel=$model" "-PspeechWav=$wav" --no-daemon --console=plain 2>&1 | Tee-Object desktop/build/speech-evidence/result.log
+          $fixtures = (Resolve-Path desktop/build/speech-evidence).Path
+          ./gradlew.bat -p desktop speechSmoke "-PspeechFixtures=$fixtures" --no-daemon --console=plain 2>&1 | Tee-Object desktop/build/speech-evidence/result.log
           if ($LASTEXITCODE -ne 0) { throw 'Speech model check failed' }
           $output = Get-Content desktop/build/speech-evidence/result.log -Raw
           if ($output -notmatch 'timed_words=22' -or $output -notmatch 'ask what you can do for your country') { throw 'Incomplete native transcript or word timing' }
