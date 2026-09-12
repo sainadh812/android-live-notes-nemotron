@@ -232,6 +232,48 @@ class DesktopRecorderTest {
         }
     }
 
+    @Test fun disconnectedMicrophoneShowsSavingWhileInferenceStillHasHeldBacklog() {
+        Fixture(Microphone(17_123), Engine(hold = true)).use { fixture ->
+            fixture.start()
+            assertTrue(fixture.engine.entered.await(5, TimeUnit.SECONDS))
+            assertTrue(fixture.microphone.emptied.await(5, TimeUnit.SECONDS))
+            fixture.microphone.line.close()
+            val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5)
+            while (fixture.phases.lastOrNull() != "saving" && System.nanoTime() < deadline) Thread.sleep(10)
+            assertEquals("Capture ended, but its transcript is still catching up", "saving", fixture.phases.lastOrNull())
+            assertEquals(1L, fixture.finished.count)
+            assertFalse(fixture.engine.destroyed)
+            fixture.engine.release.countDown()
+            fixture.awaitFinished()
+            fixture.assertAudio()
+            assertEquals(17_123, fixture.engine.consumed.get())
+            assertTrue(fixture.error.orEmpty().contains("disconnected"))
+            assertEquals(listOf("preparing", "recording", "saving", "idle"), fixture.phases.toList())
+        }
+    }
+
+    @Test fun stopBeforeFirstSamplesNeverPublishesRecordingAfterSaving() {
+        Fixture(Microphone(0), Engine()).use { fixture ->
+            val opened = CountDownLatch(1)
+            val releaseOpen = CountDownLatch(1)
+            fixture.recorder.openMicrophone = {
+                opened.countDown()
+                check(releaseOpen.await(5, TimeUnit.SECONDS))
+                fixture.microphone.line
+            }
+            fixture.start()
+            assertTrue(opened.await(5, TimeUnit.SECONDS))
+            fixture.recorder.stop()
+            assertEquals("saving", fixture.phases.last())
+            fixture.microphone.remaining.addAndGet(8_000)
+            releaseOpen.countDown()
+            fixture.awaitFinished()
+            assertEquals(listOf("preparing", "saving", "idle"), fixture.phases.toList())
+            assertNull(fixture.saved)
+            assertNull(fixture.error)
+        }
+    }
+
     @Test fun stoppedSampleDeliveryEndsCaptureAndPreservesReceivedAudio() {
         Fixture(Microphone(9_123), Engine()).use { fixture ->
             fixture.recorder.inputStallTimeoutMs = 100

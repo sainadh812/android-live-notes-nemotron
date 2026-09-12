@@ -32,6 +32,7 @@ class DesktopRecorder(
         val stop = AtomicBoolean()
         val done = CountDownLatch(1)
         val transcribedSamples = AtomicLong()
+        var phase = -1 // Published only while holding the lifecycle lock.
         @Volatile var error: String? = null
         @Volatile var audio: File? = null
         @Volatile var durationMs = 0L
@@ -68,8 +69,9 @@ class DesktopRecorder(
         stopper.shutdown()
     }
 
-    private fun requestStop(capture: Capture) {
-        if (!capture.stop.compareAndSet(false, true)) return
+    private fun requestStop(capture: Capture) = synchronized(lock) {
+        if (!capture.stop.compareAndSet(false, true)) return@synchronized
+        phase(capture, "saving")
         // Normal reads are limited to available frames. A faulty driver may
         // still block; close only after normal owner-thread draining had time.
         stopper.schedule({
@@ -91,7 +93,7 @@ class DesktopRecorder(
         val clock = TranscriptSampleClock(16_000)
         var finalized = false
         try {
-            emit { onPhase("preparing") }
+            phase(capture, "preparing")
             require(model.isFile) { "The selected speech model is missing" }
             speech.ensureLoaded()
             if (capture.stop.get()) return
@@ -120,7 +122,7 @@ class DesktopRecorder(
                     "The speech model reached its output limit. Recorded audio was preserved; the transcript is incomplete."
                 }
             }
-            emit { onPhase("saving") }
+            phase(capture, "saving")
             val ending = segments.finish(speech.nativeFinalizeStream(handle))
             onTranscriptUpdate(clock.stamp(ending))
             finalized = true
@@ -148,7 +150,7 @@ class DesktopRecorder(
                     .exceptionOrNull()?.let { failure = failure ?: "Audio saved, but word timing could not be saved: ${it.message}" }
             }
             synchronized(lock) { if (active === capture) active = null }
-            emit { onPhase("idle") }
+            phase(capture, "idle")
             emit { onFinished(capture.audio, capture.durationMs, timing, failure) }
         }
     }
@@ -181,7 +183,7 @@ class DesktopRecorder(
                     if (!receivedSamples) {
                         receivedSamples = true
                         // A device opening successfully does not mean it is delivering audio.
-                        if (!state.stop.get()) emit { onPhase("recording") }
+                        phase(state, "recording")
                     }
                     savedSamples += pcm.size
                     state.durationMs = savedSamples * 1000 / 16_000
@@ -247,6 +249,9 @@ class DesktopRecorder(
             state.error = state.error ?: error.message ?: error.javaClass.simpleName
         } finally {
             state.line = null
+            // Capture has ended even when inference still has minutes of audio
+            // to process (for example after a disconnected microphone).
+            phase(state, "saving")
             try { state.audio = wav?.finish() } catch (error: Throwable) {
                 state.error = state.error ?: "Could not finalize recorded audio: ${error.message}"
             }
@@ -254,6 +259,13 @@ class DesktopRecorder(
             progress(state)
             state.done.countDown()
         }
+    }
+
+    private fun phase(state: Capture, value: String) = synchronized(lock) {
+        val next = when (value) { "preparing" -> 0; "recording" -> 1; "saving" -> 2; "idle" -> 3; else -> error("Unknown recording phase") }
+        if (next <= state.phase || (next <= 1 && state.stop.get())) return@synchronized
+        state.phase = next
+        emit { onPhase(value) }
     }
 
     private fun progress(state: Capture) {

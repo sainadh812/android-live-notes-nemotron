@@ -113,7 +113,10 @@ class DesktopController(
         onFinished = { file, duration, _, error -> currentId?.let { events.trySendBlocking(RecordingEvent.Finished(it, file, duration, error, finishSignal)).getOrThrow() } },
         onPhase = { phase ->
             val mapped = when (phase) { "preparing" -> CapturePhase.PREPARING; "recording" -> CapturePhase.RECORDING; "saving" -> CapturePhase.SAVING; else -> null }
-            if (mapped != null) mutableState.update { it.copy(capture = it.capture.copy(phase = mapped)) }
+            if (mapped != null) mutableState.update {
+                if (stopRequested.get() && mapped != CapturePhase.SAVING) it
+                else it.copy(capture = it.capture.copy(phase = mapped))
+            }
         },
         onProgress = { capturedMs, transcribedMs ->
             mutableState.update { it.copy(capture = it.capture.copy(durationMs = maxOf(it.capture.durationMs, capturedMs),
