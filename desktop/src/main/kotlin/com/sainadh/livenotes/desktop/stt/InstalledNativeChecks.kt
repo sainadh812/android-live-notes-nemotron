@@ -12,6 +12,14 @@ internal object InstalledNativeChecks {
         val native = File(resources, "native")
         val report = File(evidence, "installed-native-checks.txt")
         report.writeText("resources_dir=${resources.canonicalPath}\n")
+        val notices = File(resources, "model-notices")
+        check(File(notices, "Notice.txt").readText().contains("Licensed by NVIDIA Corporation under the NVIDIA Open Model License")) {
+            "The packaged speech model notice is missing"
+        }
+        for (name in listOf("NVIDIA-Open-Model-License.txt", "NVIDIA-Trustworthy-AI-Terms.txt", "OpenMDW-1.1.txt", "moonshine-original-LICENSE.txt")) {
+            check(File(notices, "licenses/$name").length() > 100) { "The packaged model license is missing: $name" }
+        }
+        report.appendText("model_notices=ok\n")
         for (name in listOf("ggml-base.dll", "ggml-cpu.dll", "ggml.dll", "transcribe.dll", "livenotes_jni.dll")) {
             val library = File(native, name)
             check(library.isFile && library.length() > 0) { "Packaged speech library is missing: $library" }

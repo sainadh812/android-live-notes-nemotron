@@ -7,7 +7,7 @@ plugins {
 }
 
 group = "com.sainadh.livenotes"
-version = "1.0.0"
+version = "1.0.1"
 kotlin { jvmToolchain(17) }
 
 // Compile the same platform-independent source used by Android. Generated copies
@@ -28,6 +28,14 @@ val sharedSources by tasks.registering(Sync::class) {
     into(layout.buildDirectory.dir("generated/shared"))
 }
 kotlin.sourceSets.main { kotlin.srcDir(sharedSources) }
+
+// Ship the model agreements even when a user downloads only the GGUF file.
+val modelNotices by tasks.registering(Sync::class) {
+    from("model-mirror") { include("Notice.txt", "licenses/**", "manifest.json") }
+    into(layout.projectDirectory.dir("resources/common/model-notices"))
+}
+tasks.matching { it.name in setOf("prepareAppResources", "run", "createDistributable", "packageExe", "packageMsi") }
+    .configureEach { dependsOn(modelNotices) }
 
 dependencies {
     implementation(compose.desktop.currentOs)
@@ -70,6 +78,14 @@ tasks.register<JavaExec>("speakerCancellationCheck") {
         project.file("build/speaker-evidence/cancellation").absolutePath)
 }
 
+tasks.register<JavaExec>("modelTransferCheck") {
+    dependsOn(tasks.testClasses)
+    classpath = sourceSets.test.get().runtimeClasspath
+    mainClass.set("com.sainadh.livenotes.desktop.data.ModelTransferCheck")
+    systemProperty("livenotes.native.dir", project.file("resources/windows-x64/native").absolutePath)
+    args(project.file("build/speech-evidence").absolutePath)
+}
+
 compose.desktop {
     application {
         mainClass = "com.sainadh.livenotes.desktop.MainKt"
@@ -77,7 +93,7 @@ compose.desktop {
         nativeDistributions {
             targetFormats(TargetFormat.Exe, TargetFormat.Msi)
             packageName = "LiveMeetingNotes"
-            packageVersion = "1.0.0"
+            packageVersion = "1.0.1"
             description = "Local meeting recording, transcription and speaker notes"
             vendor = "LiveMeetingNotes"
             modules("java.sql", "java.desktop", "java.net.http", "jdk.crypto.ec", "jdk.unsupported", "java.naming")

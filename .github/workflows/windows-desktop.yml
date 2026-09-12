@@ -1,7 +1,7 @@
 name: Windows desktop checks and installer
 on:
   push:
-    branches: [main, feature/windows-desktop]
+    branches: [main, feature/windows-desktop, feature/windows-github-models]
     paths: ['desktop/**', '.github/workflows/windows-desktop.yml', 'app/src/main/java/**', 'app/src/main/cpp/nemotron_jni.cpp']
   workflow_dispatch:
 
@@ -51,14 +51,13 @@ jobs:
       - name: Cancel real speaker analysis without losing audio
         shell: pwsh
         run: ./gradlew.bat -p desktop speakerCancellationCheck --no-daemon --console=plain
-      - name: Verify real speech model and decoder timing
+      - name: Download from GitHub, import model, and verify real speech
         if: ${{ !cancelled() && steps.jvm.outcome == 'success' && steps.native.outcome == 'success' }}
         shell: pwsh
         run: |
-          python desktop/scripts/prepare-speech-smoke.py desktop/build/speech-evidence
+          python desktop/scripts/prepare-speech-smoke.py desktop/build/speech-evidence --audio-only
           if ($LASTEXITCODE -ne 0) { throw 'Speech fixture preparation failed' }
-          $fixtures = (Resolve-Path desktop/build/speech-evidence).Path
-          ./gradlew.bat -p desktop speechSmoke "-PspeechFixtures=$fixtures" --no-daemon --console=plain 2>&1 | Tee-Object desktop/build/speech-evidence/result.log
+          ./gradlew.bat -p desktop modelTransferCheck --no-daemon --console=plain 2>&1 | Tee-Object desktop/build/speech-evidence/result.log
           if ($LASTEXITCODE -ne 0) { throw 'Speech model check failed' }
           $output = Get-Content desktop/build/speech-evidence/result.log -Raw
           if ($output -notmatch 'timed_words=22' -or $output -notmatch 'ask what you can do for your country') { throw 'Incomplete native transcript or word timing' }
@@ -92,6 +91,7 @@ jobs:
             desktop/build/speaker-evidence/smoke-results.json
             desktop/build/speaker-evidence/cancellation/worker-cancellation.json
             desktop/build/speech-evidence/result.log
+            desktop/build/speech-evidence/model-transfer.json
             desktop/build/install-evidence/
           retention-days: 14
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02

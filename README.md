@@ -4,7 +4,13 @@ A Windows desktop version is available in [desktop/](desktop/README.md), with
 local recording/transcription, timed playback, and editable offline speaker
 labels. The Android build and its existing recording library are preserved.
 
-[Download Windows 1.0.0 Preview](https://github.com/sainadh812/android-live-notes-nemotron/releases/tag/windows-v1.0.0) · [Windows setup and features](desktop/README.md)
+[Download Windows 1.0.1 Preview](https://github.com/sainadh812/android-live-notes-nemotron/releases/tag/windows-v1.0.1) · [Windows setup and features](desktop/README.md)
+
+Windows 1.0.1 downloads speech models from GitHub. All six compatible models are
+available in the [models-v1 release](https://github.com/sainadh812/android-live-notes-nemotron/releases/tag/models-v1).
+You can also download a model in your browser and use **Settings → Import .gguf**
+on its matching model card, then **Use model**. See the
+[download and import instructions](desktop/README.md#speech-model-downloads-and-imports).
 
 Android app in Kotlin for live speech transcription, daily notes, and AI summaries with action items. Supports Android 8+ on arm64 devices.
 

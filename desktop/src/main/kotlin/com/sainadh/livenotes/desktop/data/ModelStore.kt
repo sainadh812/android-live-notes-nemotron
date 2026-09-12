@@ -11,6 +11,8 @@ import java.io.File
 import java.io.FileInputStream
 import java.io.FileOutputStream
 import java.io.IOException
+import java.nio.file.Files
+import java.nio.file.StandardCopyOption
 import java.security.MessageDigest
 import java.util.concurrent.TimeUnit
 
@@ -28,15 +30,76 @@ class ModelStore(private val directory: File, private val client: OkHttpClient =
     }
     suspend fun verify(model: SpeechModel): File = withContext(Dispatchers.IO) {
         val file = file(model)
-        check(validHeader(file, model.expectedBytes)) { "Download ${model.title} in Settings before recording." }
-        check(hash(file) == model.sha256) { "The ${model.title} file failed verification. Remove it and download it again." }
+        check(validHeader(file, model.expectedBytes)) { "Download or import ${model.title} in Settings before recording." }
+        check(hash(file) == model.sha256) { "The ${model.title} file failed verification. Download or import a verified copy in Settings." }
         file
     }
     suspend fun download(model: SpeechModel, progress: (Float, String) -> Unit): File = download(
-        ModelDownloadSpec(model.fileName, model.downloadUrl, model.expectedBytes, model.sha256), progress)
+        ModelSources.downloadSpec(model), progress)
+
+    /** Copies and verifies a selected file without modifying it or a resumable download. */
+    suspend fun importModel(model: SpeechModel, source: File, progress: (Float, String) -> Unit): File =
+        importModel(ModelSources.downloadSpec(model), source, progress)
+
+    internal suspend fun importModel(spec: ModelDownloadSpec, source: File, progress: (Float, String) -> Unit): File =
+        withContext(Dispatchers.IO) {
+            requireFileName(spec.name)
+            currentCoroutineContext().ensureActive()
+            check(validHeader(source, spec.bytes)) {
+                "Choose the matching ${spec.name} file (${spec.bytes} bytes). The selected file has an incorrect size or GGUF header."
+            }
+            Files.createDirectories(directory.toPath())
+            val destination = File(directory, spec.name)
+            if (destination.exists() && Files.isSameFile(source.toPath(), destination.toPath())) {
+                progress(0f, "Verifying model…")
+                check(hash(source) == spec.sha256) { "The selected model failed checksum verification. Choose the original ${spec.name} file." }
+                currentCoroutineContext().ensureActive()
+                progress(1f, "Ready")
+                return@withContext destination
+            }
+
+            // Same-directory staging makes publication atomic. A unique name keeps imports
+            // separate from each other and from the resumable .part download.
+            val staging = Files.createTempFile(directory.toPath(), "${spec.name}.import-", ".tmp")
+            try {
+                val digest = MessageDigest.getInstance("SHA-256")
+                var copied = 0L
+                progress(0f, "Importing model…")
+                FileInputStream(source).use { input ->
+                    FileOutputStream(staging.toFile()).use { output ->
+                        val buffer = ByteArray(128 * 1024)
+                        while (true) {
+                            currentCoroutineContext().ensureActive()
+                            val read = input.read(buffer)
+                            if (read < 0) break
+                            check(copied + read <= spec.bytes) { "The selected model changed size during import. Try again." }
+                            output.write(buffer, 0, read)
+                            digest.update(buffer, 0, read)
+                            copied += read
+                            progress(copied.toFloat() / spec.bytes, "Importing ${copied / 1_000_000} / ${spec.bytes / 1_000_000} MB")
+                        }
+                        output.fd.sync()
+                    }
+                }
+                currentCoroutineContext().ensureActive()
+                progress(1f, "Verifying model…")
+                check(copied == spec.bytes && validHeader(staging.toFile(), spec.bytes) &&
+                    digest.digest().joinToString("") { "%02x".format(it) } == spec.sha256) {
+                    "The selected model failed checksum verification. Choose the original ${spec.name} file."
+                }
+                currentCoroutineContext().ensureActive()
+                // Do not fall back to delete-then-copy if this filesystem cannot replace
+                // atomically: an existing installed model must survive a failed import.
+                Files.move(staging, destination.toPath(), StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING)
+                progress(1f, "Ready")
+                destination
+            } finally {
+                Files.deleteIfExists(staging)
+            }
+        }
 
     internal suspend fun download(spec: ModelDownloadSpec, progress: (Float, String) -> Unit): File = withContext(Dispatchers.IO) {
-        require(spec.name == File(spec.name).name && '/' !in spec.name && '\\' !in spec.name && spec.name !in setOf(".", ".."))
+        requireFileName(spec.name)
         val destination = File(directory, spec.name)
         val partial = File(directory, "${spec.name}.part")
         directory.mkdirs()
@@ -101,6 +164,9 @@ class ModelStore(private val directory: File, private val client: OkHttpClient =
             }
         }
         return digest.digest().joinToString("") { "%02x".format(it) }
+    }
+    private fun requireFileName(name: String) {
+        require(name == File(name).name && '/' !in name && '\\' !in name && name !in setOf(".", ".."))
     }
     private fun validHeader(file: File, bytes: Long): Boolean {
         if (!file.isFile || file.length() != bytes || bytes < 8) return false

@@ -7,6 +7,7 @@ import androidx.compose.ui.test.*
 import androidx.compose.ui.test.junit4.createComposeRule
 import com.sainadh.livenotes.data.WordCue
 import com.sainadh.livenotes.desktop.*
+import com.sainadh.livenotes.stt.SpeechModel
 import org.junit.Assert.*
 import org.junit.Rule
 import org.junit.Test
@@ -76,11 +77,40 @@ class DesktopUiTest {
         val actions = TestActions()
         show(AppState(capture = CaptureView(phase = CapturePhase.RECORDING), apiKeySaved = true), actions)
         compose.onNodeWithTag("nav-settings").performClick()
+        compose.onNodeWithTag("settings-page").performScrollToNode(hasTestTag("import-model-moonshine-tiny"))
+        compose.onNodeWithTag("import-model-moonshine-tiny").assertIsNotEnabled()
+        compose.onNodeWithTag("download-model-moonshine-tiny").assertIsNotEnabled()
         compose.onNodeWithTag("settings-page").performScrollToNode(hasTestTag("api-key-field"))
         compose.onNodeWithTag("api-key-field").assertIsNotEnabled()
         compose.onNodeWithText("Save AI settings").assertIsNotEnabled()
         compose.onNodeWithContentDescription("Automatically create summaries").assertIsNotEnabled()
         assertNull(actions.key)
+    }
+
+    @Test fun githubAndManualImportActionsIdentifyTheSelectedModelCard() {
+        val actions = TestActions()
+        show(AppState(), actions)
+        compose.onNodeWithTag("nav-settings").performClick()
+        compose.onNodeWithTag("settings-page").performScrollToNode(hasText("Open model downloads on GitHub"))
+        compose.onNodeWithText("Open model downloads on GitHub").performClick()
+        assertEquals(1, actions.openDownloadsCalls)
+        compose.onNodeWithTag("settings-page").performScrollToNode(hasTestTag("download-model-moonshine-tiny"))
+        screenshot("settings-models")
+        compose.onNodeWithTag("download-model-moonshine-tiny").performClick()
+        assertEquals(SpeechModel.MOONSHINE_TINY.id, actions.downloadedModel)
+        compose.onNodeWithTag("import-model-moonshine-tiny").performClick()
+        assertEquals(SpeechModel.MOONSHINE_TINY.id, actions.importedModel)
+    }
+
+    @Test fun importingUsesTransferProgressAndCancellation() {
+        val actions = TestActions()
+        show(AppState(downloads = SpeechModel.entries.map { model -> DownloadView(model.id,
+            downloading = model == SpeechModel.MOONSHINE_TINY, fraction = .4f, message = if (model == SpeechModel.MOONSHINE_TINY) "Importing model file…" else "") }), actions)
+        compose.onNodeWithTag("nav-settings").performClick()
+        compose.onNodeWithTag("settings-page").performScrollToNode(hasTestTag("cancel-model-moonshine-tiny"))
+        compose.onNodeWithText("Importing model file…").assertExists()
+        compose.onNodeWithTag("cancel-model-moonshine-tiny").performClick()
+        assertEquals(SpeechModel.MOONSHINE_TINY.id, actions.canceledModel)
     }
 
     private fun screenshot(name: String) {
@@ -119,6 +149,10 @@ class DesktopUiTest {
         var key: String? = null
         val playedFrom = mutableListOf<Long>()
         var playPauseCalls = 0
+        var openDownloadsCalls = 0
+        var downloadedModel: String? = null
+        var importedModel: String? = null
+        var canceledModel: String? = null
         override fun startRecording() = Unit
         override fun stopRecording() = Unit
         override fun refreshMicrophones() = Unit
@@ -142,8 +176,10 @@ class DesktopUiTest {
         override fun deleteApiKey() = Unit
         override fun testConnection() = Unit
         override fun summarize(recordingId: String) = Unit
-        override fun downloadModel(modelId: String) = Unit
-        override fun cancelModelDownload(modelId: String) = Unit
+        override fun downloadModel(modelId: String) { downloadedModel = modelId }
+        override fun importModel(modelId: String) { importedModel = modelId }
+        override fun openModelDownloads() { openDownloadsCalls++ }
+        override fun cancelModelDownload(modelId: String) { canceledModel = modelId }
         override fun removeModel(modelId: String) = Unit
         override fun installSpeakerModels() = Unit
         override fun analyzeSpeakers(recordingId: String, speakerCount: Int?) { requestedCount = speakerCount }

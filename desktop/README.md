@@ -7,17 +7,19 @@ recording libraries are separate.
 
 ## Install and record
 
-Download [Windows 1.0.0 Preview](https://github.com/sainadh812/android-live-notes-nemotron/releases/tag/windows-v1.0.0).
+Download [Windows 1.0.1 Preview](https://github.com/sainadh812/android-live-notes-nemotron/releases/tag/windows-v1.0.1).
 Use the Windows x64 EXE installer, or extract the portable ZIP and run
 `LiveMeetingNotes.exe` inside its folder. The package includes its Java runtime,
 native speech engine, and speaker worker; Java and Python installations are not
 required. Keep the files in a portable distribution together.
 
-1. Open **Settings** and download a speech model. **Nemotron English** is the
-   initial selection for English meetings (475 MB). Nemotron 3.5 supports the
-   same multilingual choices as Android; its Q8 variant is approximately 751 MB.
-   Downloads are separate from the installer and checked against pinned sizes
-   and SHA-256 hashes. A canceled speech-model download can resume.
+1. Open **Settings**, choose a speech model, and click **Download from GitHub**.
+   When it is ready, click **Use model** unless the card already says
+   **Selected**. **Nemotron English** is the initial selection for English
+   meetings (approximately 476 MB). Nemotron 3.5 supports the same multilingual
+   choices as Android; its Q8 variant is approximately 752 MB. Model files are
+   separate from the installer. Browser downloads and manual imports are also
+   supported, as described below.
 2. Choose the input microphone and supported language. Windows exposes the
    available built-in, USB, and Bluetooth input devices. This version captures
    the selected microphone input; it does not capture Teams/Zoom system output.
@@ -30,9 +32,47 @@ required. Keep the files in a portable distribution together.
 5. Copy a transcript or summary to paste/share elsewhere, save a `.txt` export,
    or export the WAV to a location outside the app's data folder.
 
-The first release uses four CPU inference threads. Intel GPU acceleration has
+This version uses four CPU inference threads. Intel GPU acceleration has
 not been enabled or measured in this build. CPU speed varies by i7 generation,
 power settings, model, and other applications running during the meeting.
+
+## Speech model downloads and imports
+
+Windows 1.0.1 uses GitHub for speech-model downloads. The
+[models-v1 release](https://github.com/sainadh812/android-live-notes-nemotron/releases/tag/models-v1)
+mirrors all six compatible model files, with the same bytes and pinned hashes
+as the app's model catalog:
+
+| Settings model card | Matching release asset | Approximate size |
+| --- | --- | --- |
+| Moonshine Tiny | `moonshine-streaming-tiny-Q8_0.gguf` | 51 MB |
+| Nemotron English | `nemotron-speech-streaming-en-0.6b-Q4_K_M.gguf` | 476 MB |
+| Nemotron 3.5 · Compact | `nemotron-3.5-asr-streaming-0.6b-Q4_K_M.gguf` | 496 MB |
+| Nemotron 3.5 · Full | `nemotron-3.5-asr-streaming-0.6b-Q8_0.gguf` | 752 MB |
+| Nemotron 3.5 · Q6 | `nemotron-3.5-asr-streaming-0.6b-Q6_K.gguf` | 622 MB |
+| Nemotron 3.5 · Q5 | `nemotron-3.5-asr-streaming-0.6b-Q5_K_M.gguf` | 560 MB |
+
+If an in-app download fails on your network:
+
+1. In **Settings → Local transcription**, click **Open model downloads on GitHub**.
+2. Download the matching `.gguf` asset from the release in your browser.
+3. Return to **Settings**, find the matching model card, and click **Import .gguf**.
+   Select the file you downloaded.
+4. Wait for verification, then click **Use model** unless the card already says
+   **Selected**. Your selection applies to the next recording.
+
+Import checks the exact file size, GGUF header, and pinned SHA-256 hash before
+installing a copy in the app's model folder. It keeps your source file. Only the
+six catalog models above are accepted; an arbitrary GGUF model is not supported.
+Downloads use the same verification, and a canceled download can resume. Finish
+recording or speaker analysis before starting a model download or import.
+
+The Windows package includes model attribution, license copies, and the pinned
+manifest under `model-notices` in its resources. The sources are
+[Notice.txt](model-mirror/Notice.txt), [manifest.json](model-mirror/manifest.json),
+and [license sources and copies](model-mirror/licenses/SOURCES.md). The GitHub
+model release also includes `model-attribution.zip` with complete original and
+conversion model cards. Model files remain under their upstream licenses.
 
 ## Speaker labels and names
 
@@ -137,7 +177,7 @@ bundled speaker worker, rendering, and shutdown. Reports,
 screenshots, and native-model results are retained as workflow artifacts.
 
 Tests cover an hour's synthetic transcript update count, persistence/recovery,
-speaker correction/merging, download integrity, playback requests, microphone
+speaker correction/merging, download/import integrity, playback requests, microphone
 conversion, stop races, subprocess cancellation, and UI actions. Real-model
 checks use the 11-second JFK speech sample and public two/four-speaker fixtures.
 They establish integration on those fixtures, not perfect recognition, reliable

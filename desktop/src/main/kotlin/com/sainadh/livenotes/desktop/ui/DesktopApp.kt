@@ -571,7 +571,9 @@ private fun SettingsPage(state: AppState, actions: DesktopActions, onRemove: (Sp
         item {
             CardSection {
                 SectionHeading(Icons.Default.GraphicEq, "Local transcription")
-                Text("Speech models run on this computer. Pick a model, download it once, and select it for your next recording.", color = Muted)
+                Text("Speech models run on this computer. Download a model from GitHub or import its file, then select it for your next recording.", color = Muted)
+                TextButton(onClick = actions::openModelDownloads) { Text("Open model downloads on GitHub") }
+                Text("If the app cannot download on your network, download the matching .gguf file in your browser, then choose Import .gguf on its model card below.", color = Muted, style = MaterialTheme.typography.bodySmall)
                 ChoicePicker("Language for ${selectedModel.title}", settings.languageCode, selectedModel.languages.map { it.code to it.label }, enabled = !busy,
                     onSelect = { actions.updateSettings(settings.copy(languageCode = it)) })
                 Text("Nemotron English is the starting choice for English meetings. Moonshine Tiny has a 4,096-token output limit and is suited to shorter notes.", color = Muted, style = MaterialTheme.typography.bodySmall)
@@ -589,15 +591,21 @@ private fun SettingsPage(state: AppState, actions: DesktopActions, onRemove: (Sp
                     if (selected) Pill("SELECTED", Mint, Teal) else if (download.installed) Pill("DOWNLOADED", Wash, Muted)
                 }
                 Text(model.description.replace("your phone", "your computer").replace("phone accuracy", "desktop accuracy"), color = Muted, style = MaterialTheme.typography.bodyMedium)
+                SelectionContainer { Text(model.fileName, color = Muted, fontFamily = FontFamily.Monospace, fontSize = 11.sp) }
                 if (download.downloading) {
                     Progress(download.fraction)
-                    Text(download.message.ifBlank { "Downloading model…" }, color = Muted, style = MaterialTheme.typography.bodySmall)
-                    TextButton(onClick = { actions.cancelModelDownload(model.id) }) { Text("Cancel download") }
-                } else Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Text(download.message.ifBlank { "Preparing model…" }, color = Muted, style = MaterialTheme.typography.bodySmall)
+                    TextButton(onClick = { actions.cancelModelDownload(model.id) }, modifier = Modifier.testTag("cancel-model-${model.id}")) { Text("Cancel") }
+                } else FlowRow(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                     if (download.installed) {
                         Button(onClick = { actions.updateSettings(settings.copy(modelId = model.id, languageCode = if (model.languages.any { it.code == settings.languageCode }) settings.languageCode else "en-US")) }, enabled = !busy && !selected) { Text(if (selected) "Selected" else "Use model") }
                         TextButton(onClick = { onRemove(model) }, enabled = !busy) { Text("Remove download") }
-                    } else OutlinedButton(onClick = { actions.downloadModel(model.id) }, enabled = !busy && state.downloads.none { it.downloading }) { Icon(Icons.Default.Download, null, modifier = Modifier.size(17.dp)); Spacer(Modifier.width(7.dp)); Text("Download model") }
+                    } else OutlinedButton(onClick = { actions.downloadModel(model.id) }, enabled = !busy && state.downloads.none { it.downloading }, modifier = Modifier.testTag("download-model-${model.id}")) {
+                        Icon(Icons.Default.Download, null, modifier = Modifier.size(17.dp)); Spacer(Modifier.width(7.dp)); Text("Download from GitHub")
+                    }
+                    OutlinedButton(onClick = { actions.importModel(model.id) }, enabled = !busy && state.downloads.none { it.downloading }, modifier = Modifier.testTag("import-model-${model.id}")) {
+                        Icon(Icons.Default.FolderOpen, null, modifier = Modifier.size(17.dp)); Spacer(Modifier.width(7.dp)); Text("Import .gguf")
+                    }
                 }
                 if (!download.downloading && download.message.isNotBlank()) Text(download.message, color = Muted, style = MaterialTheme.typography.bodySmall)
             }

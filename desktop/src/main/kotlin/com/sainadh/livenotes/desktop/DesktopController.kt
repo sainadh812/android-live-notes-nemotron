@@ -8,6 +8,7 @@ import com.sainadh.livenotes.desktop.audio.AudioDevices
 import com.sainadh.livenotes.desktop.audio.DesktopPlayer
 import com.sainadh.livenotes.desktop.data.AppPaths
 import com.sainadh.livenotes.desktop.data.ModelStore
+import com.sainadh.livenotes.desktop.data.ModelSources
 import com.sainadh.livenotes.desktop.data.RecordingStore
 import com.sainadh.livenotes.desktop.data.SecretStore
 import com.sainadh.livenotes.desktop.data.SettingsStore
@@ -45,10 +46,12 @@ import kotlinx.serialization.json.buildJsonArray
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 import java.awt.FileDialog
+import java.awt.Desktop
 import java.awt.Frame
 import java.awt.Toolkit
 import java.awt.datatransfer.StringSelection
 import java.io.File
+import java.net.URI
 import java.nio.file.Files
 import java.nio.file.StandardCopyOption
 import java.util.UUID
@@ -78,6 +81,7 @@ class DesktopController(
     private var summaryJob: Job? = null
     private var speakerJob: Job? = null
     private val downloads = mutableMapOf<String, Job>()
+    private val removingModels = mutableSetOf<String>()
     private var closed = false
     private var ready = false
     private val settingsMutex = Mutex()
@@ -206,8 +210,12 @@ class DesktopController(
         mutableState.update { it.copy(recordings = recordings) }
     }
     private suspend fun refreshDownloads() {
+        val previous = mutableState.value.downloads.associateBy { it.modelId }
         val values = withContext(Dispatchers.IO) { SpeechModel.entries.map { DownloadView(it.id, modelStore.installed(it)) } }
-        mutableState.update { it.copy(downloads = values) }
+        mutableState.update { state -> state.copy(downloads = values.map { value ->
+            val current = state.downloads.firstOrNull { it.modelId == value.modelId }
+            if (current != null && (current.downloading || current !== previous[value.modelId])) current else value
+        }) }
     }
     private suspend fun refreshKey() {
         val provider = mutableState.value.settings.providerId
@@ -220,6 +228,9 @@ class DesktopController(
     override fun startRecording() {
         if (mutableState.value.capture.active || closed || !ready) return
         if (mutableState.value.speakerJob.active) { showError("Wait for speaker analysis to finish, or cancel it before recording."); return }
+        if (downloads[mutableState.value.settings.modelId]?.isCompleted == false || mutableState.value.settings.modelId in removingModels) {
+            showError("Wait for this model to finish downloading, importing, or removing before recording."); return
+        }
         pausePlayback()
         stopRequested.set(false)
         transcript = LiveTranscriptBuffer()
@@ -395,20 +406,67 @@ class DesktopController(
     override fun dismissNotice() { mutableState.update { it.copy(notice = null) } }
 
     override fun downloadModel(modelId: String) {
-        if (downloads[modelId]?.isActive == true) return
         val model = SpeechModel.fromId(modelId) ?: return
-        if (mutableState.value.capture.active) { showError("Download models after recording finishes."); return }
+        if (!canTransferModel(modelId)) return
+        transferModel(model, null)
+    }
+    override fun importModel(modelId: String) {
+        val model = SpeechModel.fromId(modelId) ?: return
+        if (!canTransferModel(modelId)) return
+        launchOperation {
+            val dialog = FileDialog(null as Frame?, "Import ${model.title} model", FileDialog.LOAD)
+            val source = try {
+                dialog.file = "*.gguf"
+                dialog.isMultipleMode = false
+                dialog.isVisible = true
+                dialog.file?.let { File(dialog.directory, it) }
+            } finally { dialog.dispose() }
+            if (source != null && canTransferModel(modelId)) transferModel(model, source)
+        }
+    }
+    override fun openModelDownloads() { launchOperation {
+        val opened = withContext(Dispatchers.IO) {
+            runCatching {
+                check(Desktop.isDesktopSupported())
+                val desktop = Desktop.getDesktop()
+                check(desktop.isSupported(Desktop.Action.BROWSE))
+                desktop.browse(URI(ModelSources.RELEASE_PAGE))
+            }.isSuccess
+        }
+        if (!opened) {
+            Toolkit.getDefaultToolkit().systemClipboard.setContents(StringSelection(ModelSources.RELEASE_PAGE), null)
+            showNotice("The browser could not open. The GitHub model download link was copied to your clipboard.")
+        }
+    } }
+    private fun canTransferModel(modelId: String): Boolean {
+        if (closed || !ready || downloads[modelId]?.isCompleted == false) return false
+        if (modelId in removingModels) { showError("Wait for this model to finish being removed."); return false }
+        if (mutableState.value.capture.active || mutableState.value.speakerJob.active) {
+            showError("Finish recording or speaker processing before downloading or importing a model."); return false
+        }
+        return true
+    }
+    private fun transferModel(model: SpeechModel, source: File?) {
+        val modelId = model.id
+        val importing = source != null
         fun status(value: DownloadView) { mutableState.update { it.copy(downloads = it.downloads.map { row -> if (row.modelId == modelId) value else row }) } }
-        status(DownloadView(modelId, downloading = true, message = "Connecting…"))
+        status(DownloadView(modelId, downloading = true, message = if (importing) "Preparing import…" else "Connecting to GitHub…"))
         downloads[modelId] = launchOperation {
             try {
-                modelStore.download(model) { fraction, message -> status(DownloadView(modelId, downloading = true, fraction = fraction, message = message)) }
-                status(DownloadView(modelId, installed = true, message = "Ready"))
+                val progress: (Float, String) -> Unit = { fraction, message ->
+                    status(DownloadView(modelId, downloading = true, fraction = fraction, message = message))
+                }
+                if (source == null) modelStore.download(model, progress)
+                else modelStore.importModel(model, source, progress)
+                status(DownloadView(modelId, installed = true, message = if (importing) "Imported and verified" else "Ready"))
+                if (importing) showNotice("${model.title} imported and verified. Select Use model if it is not already selected.")
             } catch (cancelled: CancellationException) {
-                status(DownloadView(modelId, installed = modelStore.installed(model), message = "Paused. Download again to resume."))
+                status(DownloadView(modelId, installed = modelStore.installed(model), message = if (importing)
+                    "Import canceled. Your original file is unchanged." else "Paused. Download from GitHub again to resume."))
                 throw cancelled
             } catch (error: Throwable) {
-                status(DownloadView(modelId, installed = modelStore.installed(model), message = "Download failed. Retry to resume."))
+                status(DownloadView(modelId, installed = modelStore.installed(model), message = if (importing)
+                    "Import failed. Choose the matching model file and retry." else "Download failed. Retry, or download in your browser and use Import .gguf."))
                 throw error
             }
         }
@@ -417,11 +475,15 @@ class DesktopController(
         SpeechModel.fromId(modelId)?.let(modelStore::cancel)
         downloads[modelId]?.cancel()
     }
-    override fun removeModel(modelId: String) { launchOperation {
-        check(!mutableState.value.capture.active && downloads[modelId]?.isActive != true) { "Finish recording and cancel this download before removing the model." }
-        SpeechModel.fromId(modelId)?.let { withContext(Dispatchers.IO) { modelStore.remove(it) } }
-        refreshDownloads()
-    } }
+    override fun removeModel(modelId: String) {
+        val model = SpeechModel.fromId(modelId) ?: return
+        if (!canTransferModel(modelId)) return
+        removingModels += modelId
+        launchOperation {
+            try { withContext(Dispatchers.IO) { modelStore.remove(model) } }
+            finally { removingModels -= modelId; refreshDownloads() }
+        }
+    }
     override fun installSpeakerModels() {
         if (mutableState.value.speakerJob.active || mutableState.value.capture.active) return
         mutableState.update { it.copy(speakerJob = it.speakerJob.copy(active = true, installing = true, message = "Preparing speaker models…")) }

@@ -22,7 +22,7 @@ if ($Process.ExitCode -ne 0 -or -not (Test-Path "$Evidence/startup-ok.txt") -or 
 if (-not (Test-Path "$Evidence/installed-app.png")) { throw "Installed app screenshot is missing" }
 if (-not (Test-Path "$Evidence/installed-native-checks.txt")) { throw "Installed native resource checks are missing" }
 $NativeChecks = Get-Content "$Evidence/installed-native-checks.txt" -Raw
-if ($NativeChecks -notmatch 'native_dll_load=ok' -or $NativeChecks -notmatch 'speaker_worker_self_test=ok') {
+if ($NativeChecks -notmatch 'native_dll_load=ok' -or $NativeChecks -notmatch 'speaker_worker_self_test=ok' -or $NativeChecks -notmatch 'model_notices=ok') {
     throw "Installed speech libraries or speaker worker checks did not pass"
 }
 Write-Host "Installed Windows app launched, opened its database, loaded its speech DLLs, verified its speaker worker, rendered UI, and closed successfully."

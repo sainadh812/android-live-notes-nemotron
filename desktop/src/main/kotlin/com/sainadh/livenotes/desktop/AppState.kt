@@ -126,6 +126,8 @@ interface DesktopActions {
     fun testConnection()
     fun summarize(recordingId: String)
     fun downloadModel(modelId: String)
+    fun importModel(modelId: String)
+    fun openModelDownloads()
     fun cancelModelDownload(modelId: String)
     fun removeModel(modelId: String)
     fun installSpeakerModels()
