@@ -137,13 +137,17 @@ class DesktopController(
                         }
                     }
                 } catch (error: Throwable) {
-                    recorder.stop()
+                    val failedId = when (event) { is RecordingEvent.Text -> event.id; is RecordingEvent.Finished -> event.id }
+                    val ownsCapture = failedId == currentId
+                    if (ownsCapture) recorder.stop()
                     val message = "Could not save meeting data: ${error.message}. The transcript may be incomplete; audio may be recovered when the app restarts."
                     if (event is RecordingEvent.Text) persistenceErrors.putIfAbsent(event.id, message)
                     showError(message)
                     if (event is RecordingEvent.Finished) {
-                        currentId = null
-                        mutableState.update { it.copy(capture = it.capture.copy(phase = CapturePhase.IDLE, level = 0f)) }
+                        if (ownsCapture) {
+                            currentId = null
+                            mutableState.update { it.copy(capture = it.capture.copy(phase = CapturePhase.IDLE, level = 0f)) }
+                        }
                         event.completion.complete(Unit)
                     }
                 }
@@ -253,7 +257,7 @@ class DesktopController(
     } }
     override fun selectRecording(id: String) {
         loadJob?.cancel()
-        if (playbackId != id) { pausePlayback(); playbackId = null; playedFile = null }
+        if (playbackId != id) pausePlayback()
         mutableState.update { it.copy(selected = null, loadingRecording = true) }
         loadJob = launchOperation {
             try {
@@ -559,12 +563,16 @@ class DesktopController(
         finishSignal.await()
         downloads.keys.toList().forEach(::cancelModelDownload)
         downloads.values.toList().forEach { it.join() }
-        speakerJob?.cancel(); speakerJob?.join()
+        speakerJob?.let { it.cancel(); it.join() }
         aiHttp.dispatcher.cancelAll()
-        summaryJob?.cancel(); summaryJob?.join()
-        player.close(); recorder.close()
+        summaryJob?.let { it.cancel(); it.join() }
+        player.close()
+        withContext(Dispatchers.IO) { player.unload() }
+        recorder.close()
         events.close()
+        val applicationJob = scope.coroutineContext[Job]
         scope.cancel()
+        applicationJob?.join()
         withContext(Dispatchers.IO) { store.close() }
     }
 }

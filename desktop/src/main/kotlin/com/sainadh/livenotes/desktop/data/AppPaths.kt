@@ -19,7 +19,8 @@ class AppPaths(val root: File = defaultRoot()) {
         fun defaultRoot(): File = System.getProperty("livenotes.dataDir")?.let(::File)
             ?: if (System.getProperty("os.name").startsWith("Windows")) {
                 val parent = System.getenv("LOCALAPPDATA") ?: File(System.getProperty("user.home"), "AppData/Local").path
-                File(parent, "LiveMeetingNotes")
+                // Keep user data outside jpackage's per-user installation directory.
+                File(parent, "LiveMeetingNotesData")
             } else File(System.getProperty("user.home"), ".local/share/LiveMeetingNotes")
         fun resources(): File = System.getProperty("compose.application.resources.dir")?.let(::File)
             ?: System.getProperty("livenotes.resourcesDir")?.let(::File)

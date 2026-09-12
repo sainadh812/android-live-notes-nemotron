@@ -2,12 +2,12 @@ param([string]$Destination = (Join-Path $PSScriptRoot "..\resources\windows-x64\
 $ErrorActionPreference = "Stop"
 Push-Location $PSScriptRoot
 try {
-    python -m pip install --disable-pip-version-check -r requirements.txt
+    python -m pip install --disable-pip-version-check --only-binary=:all: -r requirements.txt
     if ($LASTEXITCODE -ne 0) { throw "Speaker worker dependencies failed to install" }
     python -m unittest discover -s tests -v
     if ($LASTEXITCODE -ne 0) { throw "Speaker worker tests failed" }
     python -m PyInstaller --noconfirm --clean --onedir --console --name speaker-worker `
-        --collect-all sherpa_onnx --copy-metadata sherpa-onnx --copy-metadata numpy `
+        --collect-all sherpa_onnx --copy-metadata sherpa-onnx --copy-metadata sherpa-onnx-core --copy-metadata numpy `
         --add-data "models.json;." --add-data "licenses;licenses" --add-data "THIRD_PARTY.md;." worker.py
     if ($LASTEXITCODE -ne 0) { throw "Speaker worker packaging failed" }
     & ".\dist\speaker-worker\speaker-worker.exe" --self-test

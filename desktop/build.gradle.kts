@@ -58,6 +58,16 @@ tasks.register<JavaExec>("speechSmoke") {
     }
 }
 
+tasks.register<JavaExec>("speakerCancellationCheck") {
+    dependsOn(tasks.testClasses)
+    classpath = sourceSets.test.get().runtimeClasspath
+    mainClass.set("com.sainadh.livenotes.desktop.speakers.WorkerCancellationCheck")
+    args(project.file("resources/windows-x64/speaker-worker").absolutePath,
+        project.file("build/speaker-evidence/speaker models 会议").absolutePath,
+        project.file("build/speaker-evidence/0-four-speakers-zh.wav").absolutePath,
+        project.file("build/speaker-evidence/cancellation").absolutePath)
+}
+
 compose.desktop {
     application {
         mainClass = "com.sainadh.livenotes.desktop.MainKt"

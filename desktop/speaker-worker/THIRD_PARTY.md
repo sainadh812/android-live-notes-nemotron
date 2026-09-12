@@ -6,7 +6,7 @@ account, or a separate Python installation.
 
 | Component | Source and license |
 | --- | --- |
-| sherpa-onnx 1.12.14 | [k2-fsa/sherpa-onnx](https://github.com/k2-fsa/sherpa-onnx/tree/v1.12.14), Apache-2.0 |
+| sherpa-onnx / sherpa-onnx-core 1.12.26 | [k2-fsa/sherpa-onnx](https://github.com/k2-fsa/sherpa-onnx/tree/v1.12.26), Apache-2.0 |
 | Pyannote segmentation 3.0 ONNX export | [Public sherpa-onnx maintainer release](https://github.com/k2-fsa/sherpa-onnx/releases/tag/speaker-segmentation-models), MIT, copyright CNRS |
 | NeMo TitaNet-S ONNX export | [Public sherpa-onnx maintainer release](https://github.com/k2-fsa/sherpa-onnx/releases/tag/speaker-recongition-models), [NVIDIA model card](https://catalog.ngc.nvidia.com/orgs/nvidia/nemo/models/titanet_small), Apache-2.0 under the [NeMo toolkit license](https://github.com/NVIDIA/NeMo/blob/v1.19.0/LICENSE) |
 | NumPy 2.2.6 | [NumPy](https://github.com/numpy/numpy/tree/v2.2.6), BSD-3-Clause; bundled dependency metadata contains its notices |

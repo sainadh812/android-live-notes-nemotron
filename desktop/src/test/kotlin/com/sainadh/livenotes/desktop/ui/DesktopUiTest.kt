@@ -1,14 +1,10 @@
 package com.sainadh.livenotes.desktop.ui
 
-import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.requiredSize
-import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.graphics.toPixelMap
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.*
 import androidx.compose.ui.test.junit4.createComposeRule
-import androidx.compose.ui.unit.dp
 import com.sainadh.livenotes.data.WordCue
 import com.sainadh.livenotes.desktop.*
 import org.junit.Assert.*
@@ -23,7 +19,9 @@ class DesktopUiTest {
     @get:Rule val compose = createComposeRule()
 
     private fun show(state: AppState, actions: TestActions) {
-        compose.setContent { Box(Modifier.requiredSize(1_200.dp, 800.dp)) { DesktopApp(state.copy(initializing = false), actions) } }
+        // Use the test scene's actual viewport (1024×768 on Windows CI). Forcing a larger
+        // requiredSize centers an oversized layout and crops the sidebar and player controls.
+        compose.setContent { DesktopApp(state.copy(initializing = false), actions) }
     }
 
     @Test fun longCaptureKeepsFullTranscriptActionsAvailable() {
@@ -77,6 +75,7 @@ class DesktopUiTest {
     private fun screenshot(name: String) {
         compose.waitForIdle()
         val image = compose.onRoot().captureToImage().toPixelMap()
+        assertTrue("Exercise a supported desktop viewport", image.width >= 900 && image.height >= 640)
         val output = BufferedImage(image.width, image.height, BufferedImage.TYPE_INT_ARGB)
         for (y in 0 until image.height) for (x in 0 until image.width) output.setRGB(x, y, image[x, y].toArgb())
         val destination = File("build/reports/desktop-ui/$name.png")

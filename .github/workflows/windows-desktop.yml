@@ -45,6 +45,9 @@ jobs:
         run: |
           python desktop/speaker-worker/smoke_test.py --worker desktop/resources/windows-x64/speaker-worker/speaker-worker.exe --work desktop/build/speaker-evidence
           if ($LASTEXITCODE -ne 0) { throw 'Speaker model checks failed' }
+      - name: Cancel real speaker analysis without losing audio
+        shell: pwsh
+        run: ./gradlew.bat -p desktop speakerCancellationCheck --no-daemon --console=plain
       - name: Verify real speech model and decoder timing
         shell: pwsh
         run: |
@@ -80,6 +83,7 @@ jobs:
             desktop/build/reports/
             desktop/build/test-results/
             desktop/build/speaker-evidence/smoke-results.json
+            desktop/build/speaker-evidence/cancellation/worker-cancellation.json
             desktop/build/speech-evidence/result.log
             desktop/build/install-evidence/
           retention-days: 14

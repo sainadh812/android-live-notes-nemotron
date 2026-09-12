@@ -166,7 +166,7 @@ def result_from_segments(segments, duration_ms: int) -> dict:
 
 def create_engine(models: Path, num_speakers: int | None, threshold: float):
     import sherpa_onnx
-    # sherpa 1.12.14 reads models using narrow std::ifstream on Windows. Python
+    # sherpa 1.12.26 reads models using narrow std::ifstream on Windows. Python
     # changes directory through the wide Windows API; the native model filenames
     # stay ASCII even when the user's profile path contains non-ASCII characters.
     original_directory = Path.cwd()

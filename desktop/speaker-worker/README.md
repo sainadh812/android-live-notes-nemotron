@@ -6,6 +6,14 @@ native import and copies it to `desktop/resources/windows-x64/speaker-worker`.
 Ship the whole directory; `_internal` contains the Python runtime and native DLLs.
 The Windows app does not need a user-installed Python runtime.
 
+The pinned runtime is sherpa-onnx 1.12.26 and sherpa-onnx-core 1.12.26. The
+[PyPI release](https://pypi.org/project/sherpa-onnx/1.12.26/#files) provides
+`sherpa_onnx-1.12.26-cp311-cp311-win_amd64.whl` (SHA-256
+`15b14d51f961029fc4a031874b4951b7458b17877f4bd2688abf3d36328c97cf`).
+The core wheel installs native DLLs under `sherpa_onnx/lib`; PyInstaller collects
+the whole package and both distributions' metadata. Dependency installation
+requires binary wheels so a missing platform build fails immediately.
+
 ```
 speaker-worker.exe --self-test
 speaker-worker.exe --install-models --models C:\path\to\speaker-models
@@ -59,3 +67,9 @@ counts, and also verifies that automatic counting produces valid speech spans.
 These short examples test integration, not long-meeting accuracy. Their source
 URLs and checksums are pinned in the script. Audio fixtures are not redistributed
 in the app. Model and runtime notices are in `THIRD_PARTY.md` and `licenses/`.
+
+After the smoke test installs models, the test-runtime main class
+`com.sainadh.livenotes.desktop.speakers.WorkerCancellationCheck` takes four paths:
+worker directory, model directory, the four-speaker fixture WAV, and evidence
+directory. It starts actual native analysis, cancels after the first processed
+window, and verifies process termination, scratch cleanup, and an unchanged WAV.
