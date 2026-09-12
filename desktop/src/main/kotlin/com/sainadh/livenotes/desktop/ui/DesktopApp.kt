@@ -674,6 +674,12 @@ private fun SettingsPage(state: AppState, actions: DesktopActions, onRemove: (Sp
                 if (state.speakerJob.installing || state.speakerJob.active) SpeakerProgress(state.speakerJob, actions)
                 else if (!state.speakerJob.modelsInstalled) OutlinedButton(onClick = actions::installSpeakerModels, enabled = !state.capture.active && state.downloads.none { it.downloading }) { Text("Download speaker models") }
                 else Pill("SPEAKER MODELS READY", Mint, Teal)
+                if (!state.speakerJob.active && !state.speakerJob.installing && state.speakerJob.message.isNotBlank()) {
+                    SelectionContainer {
+                        Text(state.speakerJob.message, color = if (state.speakerJob.failed) Error else Teal,
+                            style = MaterialTheme.typography.bodySmall, modifier = Modifier.testTag("speaker-status"))
+                    }
+                }
                 ToggleRow("Identify speakers after recording", "Runs after speech transcription finishes, so the two models do not compete during capture.", settings.autoSpeakers, enabled = !busy) { actions.updateSettings(settings.copy(autoSpeakers = it)) }
                 Text("Labels are best-effort. Brief replies, similar voices, and overlapping speech can need manual correction. Speaker names are entered by you.", color = Muted, style = MaterialTheme.typography.bodySmall)
             }

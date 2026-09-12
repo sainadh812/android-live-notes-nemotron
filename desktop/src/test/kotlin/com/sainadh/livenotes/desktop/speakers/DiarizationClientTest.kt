@@ -23,6 +23,7 @@ class DiarizationClientTest {
             Files.writeString(worker, """
                 |#!/bin/sh
                 |printf '%s' "${'$'}${'$'}" > "${'$'}(dirname "${'$'}0")/pid"
+                |printf '%s\n' '{"event":"ready","protocolVersion":1}'
                 |printf '%s\n' '{"event":"progress","stage":"analyzing","fraction":0.1,"message":"Working"}'
                 |while :; do sleep 1; done
                 |
@@ -33,7 +34,7 @@ class DiarizationClientTest {
             val started = CompletableDeferred<Unit>()
             val jobs = root.resolve("jobs")
             val client = DiarizationClient(root, root.resolve("models"), jobs)
-            val task = launch { client.analyze(audio) { started.complete(Unit) } }
+            val task = launch { client.analyze(audio) { if (it.stage == "analyzing") started.complete(Unit) } }
             withTimeout(5_000) { started.await() }
             val pid = Files.readString(root.resolve("pid")).toLong()
             withTimeout(5_000) { task.cancelAndJoin() }

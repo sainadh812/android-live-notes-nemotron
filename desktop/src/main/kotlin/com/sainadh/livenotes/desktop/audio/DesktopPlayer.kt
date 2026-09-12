@@ -215,7 +215,9 @@ class DesktopPlayer(private val onState: (PlaybackState) -> Unit) : AutoCloseabl
                     val wav = reader
                     val output = line
                     if (playing && wav != null && output != null) {
-                        check(output.isOpen && output.isRunning) { "The playback device stopped or disconnected. Reconnect it or choose another output." }
+                        // A started JavaSound output can stay non-running until
+                        // its first write. The device clock below detects stalls.
+                        check(output.isOpen) { "The playback device stopped or disconnected. Reconnect it or choose another output." }
                         val playedFrames = output.longFramePosition
                         if (playedFrames > lastOutputFrame) {
                             lastOutputFrame = playedFrames
@@ -253,7 +255,7 @@ class DesktopPlayer(private val onState: (PlaybackState) -> Unit) : AutoCloseabl
                     }
                 } catch (failure: Exception) {
                     val disconnected = playing && line?.let { output ->
-                        runCatching { !output.isOpen || !output.isRunning }.getOrDefault(false)
+                        runCatching { !output.isOpen }.getOrDefault(false)
                     } == true
                     position = audiblePosition()
                     playing = false

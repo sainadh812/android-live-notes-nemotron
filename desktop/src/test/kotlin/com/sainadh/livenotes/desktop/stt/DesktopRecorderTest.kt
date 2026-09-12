@@ -15,16 +15,19 @@ import org.junit.Test
 
 class DesktopRecorderTest {
     private class Microphone(frames: Int, val blockRead: Boolean = false, val sample: Short = 16_384,
-        val sampleAt: ((Int) -> Short)? = null) {
+        val sampleAt: ((Int) -> Short)? = null, val startupDelayMs: Long = 0) {
         val remaining = AtomicInteger(frames)
         val readFrames = AtomicInteger()
         val closed = CountDownLatch(1)
         val emptied = CountDownLatch(1)
         val readEntered = CountDownLatch(1)
+        @Volatile var activityReported = true
+        @Volatile private var startedAt = 0L
         val line = Proxy.newProxyInstance(javaClass.classLoader, arrayOf(TargetDataLine::class.java)) { _, method, args ->
             when (method.name) {
                 "getFormat" -> AudioFormat(16_000f, 16, 1, true, false)
-                "available" -> remaining.get() * 2
+                "start" -> { startedAt = System.nanoTime(); null }
+                "available" -> if (System.nanoTime() - startedAt < TimeUnit.MILLISECONDS.toNanos(startupDelayMs)) 0 else remaining.get() * 2
                 "read" -> {
                     readEntered.countDown()
                     if (blockRead) {
@@ -44,7 +47,9 @@ class DesktopRecorderTest {
                     count * 2
                 }
                 "close" -> { closed.countDown(); null }
-                "isOpen", "isActive", "isRunning" -> closed.count != 0L
+                "isOpen" -> closed.count != 0L
+                // Like OpenJDK's DirectTDL, the first read activates the line.
+                "isActive", "isRunning" -> closed.count != 0L && readFrames.get() > 0 && activityReported
                 "getControls" -> emptyArray<javax.sound.sampled.Control>()
                 "isControlSupported" -> false
                 "toString" -> "Test microphone"
@@ -139,6 +144,43 @@ class DesktopRecorderTest {
             val latest = fixture.updates.associateBy { it.segmentId }.values
             assertEquals("hello world", latest.joinToString("") { it.text })
             assertTrue(latest.all { it.status == TranscriptStatus.FINAL })
+        }
+    }
+
+    @Test fun microphoneWaitsForInitialPcmEvenWhenStartHasNotMadeTheLineRunning() {
+        Fixture(Microphone(17_123, startupDelayMs = 200), Engine(hold = true)).use { fixture ->
+            fixture.start()
+            assertFalse(fixture.microphone.readEntered.await(80, TimeUnit.MILLISECONDS))
+            assertTrue(fixture.engine.entered.await(5, TimeUnit.SECONDS))
+            assertTrue(fixture.microphone.emptied.await(5, TimeUnit.SECONDS))
+            fixture.recorder.stop()
+            fixture.engine.release.countDown()
+            fixture.awaitFinished()
+            fixture.assertAudio()
+            assertNull(fixture.error)
+            assertEquals(17_123, fixture.engine.consumed.get())
+            assertTrue(fixture.phases.contains("recording"))
+        }
+    }
+
+    @Test fun activityFlagDoesNotOverrideContinuingPcmDelivery() {
+        Fixture(Microphone(8_000), Engine(hold = true)).use { fixture ->
+            fixture.start()
+            assertTrue(fixture.engine.entered.await(5, TimeUnit.SECONDS))
+            assertTrue(fixture.microphone.emptied.await(5, TimeUnit.SECONDS))
+            fixture.microphone.activityReported = false
+            fixture.microphone.remaining.addAndGet(8_000)
+            val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5)
+            while (fixture.microphone.readFrames.get() < 16_000 && System.nanoTime() < deadline) Thread.sleep(10)
+            assertEquals(16_000, fixture.microphone.readFrames.get())
+            Thread.sleep(100) // More than one health-check interval.
+            assertEquals(1L, fixture.microphone.closed.count)
+            fixture.recorder.stop()
+            fixture.engine.release.countDown()
+            fixture.awaitFinished()
+            fixture.assertAudio()
+            assertNull(fixture.error)
+            assertEquals(16_000, fixture.engine.consumed.get())
         }
     }
 

@@ -15,6 +15,7 @@ internal class FakeOutputLine(val format: AudioFormat, private val accepts: (Aud
     val playedFrames = AtomicLong()
     @Volatile var opened = false
     @Volatile var running = false
+    @Volatile private var started = false
     private val pcm = ByteArrayOutputStream()
     fun pcmBytes(): ByteArray = synchronized(pcm) { pcm.toByteArray() }
     val line = Proxy.newProxyInstance(javaClass.classLoader, arrayOf(SourceDataLine::class.java)) { _, method, args ->
@@ -28,7 +29,8 @@ internal class FakeOutputLine(val format: AudioFormat, private val accepts: (Aud
             "getFormat" -> format
             "available", "getBufferSize" -> 16_384
             "write" -> {
-                check(opened && running)
+                check(opened && started)
+                running = true // OpenJDK DirectSDL activates on its first write.
                 val bytes = args!![0] as ByteArray
                 val offset = args[1] as Int
                 val count = args[2] as Int
@@ -38,9 +40,9 @@ internal class FakeOutputLine(val format: AudioFormat, private val accepts: (Aud
             }
             "getLongFramePosition" -> playedFrames.get()
             "getFramePosition" -> playedFrames.get().toInt()
-            "start" -> { running = true; null }
-            "stop" -> { running = false; null }
-            "close" -> { opened = false; running = false; closed.countDown(); null }
+            "start" -> { started = true; null }
+            "stop" -> { started = false; running = false; null }
+            "close" -> { opened = false; started = false; running = false; closed.countDown(); null }
             "isOpen" -> opened
             "isActive", "isRunning" -> running
             "getControls" -> emptyArray<javax.sound.sampled.Control>()

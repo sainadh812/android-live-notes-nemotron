@@ -4,7 +4,11 @@ A Windows desktop version is available in [desktop/](desktop/README.md), with
 local recording/transcription, timed playback, and editable offline speaker
 labels. The Android build and its existing recording library are preserved.
 
-[Download Windows 1.0.2 Preview](https://github.com/sainadh812/android-live-notes-nemotron/releases/tag/windows-v1.0.2) · [Windows setup and features](desktop/README.md)
+[Download Windows 1.0.3 Preview](https://github.com/sainadh812/android-live-notes-nemotron/releases/tag/windows-v1.0.3) · [Windows setup and features](desktop/README.md)
+
+Windows 1.0.3 fixes the microphone startup regression introduced in 1.0.2 and
+reports missing, blocked, or unresponsive speaker components in Settings.
+See [microphone and speaker troubleshooting](desktop/README.md#microphone-and-speaker-startup).
 
 Windows 1.0.2 adds Windows proxy/certificate support for model downloads,
 speaker/headphone selection, device tests, and microphone permission guidance.

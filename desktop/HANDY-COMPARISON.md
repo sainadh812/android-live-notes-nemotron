@@ -5,6 +5,12 @@ Reviewed Handy's source at commit
 The changes below adapt relevant behavior to this app's existing implementation.
 They do not replace the speech model or recording library.
 
+Follow-up: 1.0.3 corrects the early JavaSound activity-flag check introduced in
+1.0.2. Input/output readiness is now determined from actual audio I/O rather than
+requiring `isRunning` before the first read/write. See
+[startup troubleshooting](README.md#microphone-and-speaker-startup) for that
+regression and the separate speaker-worker security-block investigation.
+
 | Area | Handy | LiveMeetingNotes 1.0.2 |
 | --- | --- | --- |
 | Model files and hosts | Handy's catalog includes all six of our speech GGUF files with the same sizes and SHA-256 hashes. It tries Hugging Face and configured Handy blob mirrors; not every quantization is guaranteed to exist on a mirror. | Keeps those same six files as verified GitHub release assets, plus browser/file import introduced in 1.0.1. No model replacement is needed. |

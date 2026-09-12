@@ -7,7 +7,7 @@ plugins {
 }
 
 group = "com.sainadh.livenotes"
-version = "1.0.2"
+version = "1.0.3"
 kotlin { jvmToolchain(17) }
 
 // Compile the same platform-independent source used by Android. Generated copies
@@ -94,7 +94,7 @@ compose.desktop {
         nativeDistributions {
             targetFormats(TargetFormat.Exe, TargetFormat.Msi)
             packageName = "LiveMeetingNotes"
-            packageVersion = "1.0.2"
+            packageVersion = "1.0.3"
             description = "Local meeting recording, transcription and speaker notes"
             vendor = "LiveMeetingNotes"
             modules("java.sql", "java.desktop", "java.net.http", "jdk.crypto.ec", "jdk.unsupported", "java.naming")

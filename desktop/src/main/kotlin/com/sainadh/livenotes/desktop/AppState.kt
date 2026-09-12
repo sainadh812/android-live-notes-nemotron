@@ -83,7 +83,8 @@ data class SpeakerJobView(
     val fraction: Float? = null,
     val message: String = "",
     val modelsInstalled: Boolean = false,
-    val installing: Boolean = false
+    val installing: Boolean = false,
+    val failed: Boolean = false
 )
 data class AppState(
     val initializing: Boolean = true,

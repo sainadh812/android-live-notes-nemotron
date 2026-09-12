@@ -50,7 +50,8 @@ object RecorderBacklogCheck {
                     count
                 }
                 "close" -> { lineClosed.countDown(); null }
-                "isOpen", "isRunning", "isActive" -> lineClosed.count != 0L
+                "isOpen" -> lineClosed.count != 0L
+                "isRunning", "isActive" -> lineClosed.count != 0L && readBytes.get() > 0
                 "getControls" -> emptyArray<javax.sound.sampled.Control>()
                 "isControlSupported" -> false
                 "toString" -> "Recorded JFK fixture microphone"
@@ -117,6 +118,7 @@ object RecorderBacklogCheck {
               "peakLagMs": ${peakLagMs.get()},
               "pcmBytes": ${pcm.size},
               "pcmMatchesFixture": true,
+              "deviceActivatesOnFirstRead": true,
               "nativeDestroyedBeforeFinished": true,
               "temporarySpoolRemoved": true,
               "filesUnlocked": true,

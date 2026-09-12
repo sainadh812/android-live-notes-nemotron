@@ -16,6 +16,25 @@ spec.loader.exec_module(worker)
 
 
 class WorkerTests(unittest.TestCase):
+    def test_startup_ready_precedes_install_and_analysis_work(self):
+        for operation in ("--install-models", "--analyze"):
+            events = []
+            with tempfile.TemporaryDirectory() as directory:
+                args = ["worker", operation]
+                if operation == "--analyze":
+                    args.append(str(Path(directory) / "meeting.wav"))
+                    args.extend(["--output", str(Path(directory) / "result.json")])
+                args.extend(["--models", str(Path(directory) / "models")])
+                def capture_event(event, **values):
+                    events.append((event, values))
+                def work(*_args):
+                    self.assertEqual([("ready", {"protocolVersion": 1})], events)
+                    events.append(("operation", {}))
+                with patch.object(worker.sys, "argv", args), patch.object(worker, "emit", side_effect=capture_event), \
+                        patch.object(worker, "install_models", side_effect=work), patch.object(worker, "analyze", side_effect=work):
+                    self.assertEqual(0, worker.main())
+                    self.assertEqual("operation", events[-1][0])
+
     def test_model_sources_use_public_downloads_without_api_quota(self):
         for entry in worker.MANIFEST["files"]:
             source = urlparse(entry["sourceUrl"])

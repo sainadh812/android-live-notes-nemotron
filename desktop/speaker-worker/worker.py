@@ -242,6 +242,11 @@ def main() -> int:
             parser.error("--models is required")
         if not math.isfinite(args.threshold) or not 0.01 <= args.threshold <= 1.99:
             parser.error("--threshold must be between 0.01 and 1.99")
+        if args.analyze is not None and args.output is None:
+            parser.error("--output is required")
+        # Startup acknowledgement precedes downloads and native model loading. The
+        # client times out only this startup phase, never long meeting inference.
+        emit("ready", protocolVersion=1)
         if args.install_models:
             if args.scratch:
                 args.scratch.mkdir(parents=True, exist_ok=True)
@@ -250,8 +255,6 @@ def main() -> int:
                 with tempfile.TemporaryDirectory(prefix="live-notes-speakers-") as directory:
                     install_models(args.models, Path(directory))
         else:
-            if args.output is None:
-                parser.error("--output is required")
             analyze(args.analyze, args.models, args.output, args.num_speakers, args.threshold)
         return 0
     except (Exception, KeyboardInterrupt) as error:

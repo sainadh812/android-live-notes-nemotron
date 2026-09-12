@@ -1,7 +1,7 @@
 name: Windows desktop checks and installer
 on:
   push:
-    branches: [main, feature/windows-desktop, feature/windows-github-models, feature/windows-handy-reliability]
+    branches: [main, feature/windows-desktop, feature/windows-github-models, feature/windows-handy-reliability, feature/windows-startup-reliability]
     paths: ['desktop/**', '.github/workflows/windows-desktop.yml', 'app/src/main/java/**', 'app/src/main/cpp/nemotron_jni.cpp']
   workflow_dispatch:
 
@@ -72,6 +72,17 @@ jobs:
           Copy-Item desktop/build/compose/binaries/main/exe/*.exe desktop/build/release/
           Copy-Item desktop/build/compose/binaries/main/msi/*.msi desktop/build/release/
           Compress-Archive -Path desktop/build/compose/binaries/main/app/LiveMeetingNotes -DestinationPath desktop/build/release/LiveMeetingNotes-windows-x64-portable.zip
+          $worker = Get-Item desktop/build/compose/binaries/main/app/LiveMeetingNotes/app/resources/speaker-worker/speaker-worker.exe
+          @(
+            'Component: speaker-worker.exe (optional local speaker identification)'
+            "Source commit: $env:GITHUB_SHA"
+            "SHA256: $((Get-FileHash $worker.FullName -Algorithm SHA256).Hash.ToLower())"
+            "Bytes: $($worker.Length)"
+            "Authenticode status: $((Get-AuthenticodeSignature $worker.FullName).Status)"
+            "Source: https://github.com/$env:GITHUB_REPOSITORY/tree/$env:GITHUB_SHA/desktop/speaker-worker"
+            'A matching hash identifies the release file; it is not a malware verdict or security approval.'
+            'If security software blocks this component, give its detection details and this file to your IT/security team for review.'
+          ) | Set-Content -Encoding utf8 desktop/build/release/speaker-worker-details.txt
       - name: Install and launch packaged Windows app
         id: installed
         if: ${{ !cancelled() && steps.package.outcome == 'success' }}

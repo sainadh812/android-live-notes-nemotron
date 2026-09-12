@@ -104,6 +104,23 @@ class DesktopPlayerTest {
         } finally { player.close(); player.unload() }
     }
 
+    @Test fun outputStartsWithFirstWriteAndMissingClockProgressStillStopsPlayback() = withWav(ShortArray(16_000)) { file ->
+        val states = LinkedBlockingQueue<PlaybackState>()
+        val output = FakeOutputLine(AudioFormat(48_000f, 16, 2, true, false))
+        val player = DesktopPlayer { states.offer(it) }.apply {
+            openOutput = { _, _ -> output.open() }
+            outputStallTimeoutMs = 150
+        }
+        try {
+            player.load(file); player.play()
+            val failure = awaitState(states) { it.error != null }
+            assertTrue("An initially non-running device must receive PCM", output.acceptedFrames.get() > 0)
+            assertTrue(failure.error!!.contains("stopped accepting audio"))
+            assertTrue(!failure.isPlaying)
+            assertTrue(output.closed.await(1, TimeUnit.SECONDS))
+        } finally { player.close(); player.unload() }
+    }
+
     private fun awaitCondition(predicate: () -> Boolean) {
         val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5)
         while (!predicate() && System.nanoTime() < deadline) Thread.sleep(5)

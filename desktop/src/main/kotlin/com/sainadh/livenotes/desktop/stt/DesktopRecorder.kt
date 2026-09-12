@@ -211,7 +211,7 @@ class DesktopRecorder(
                     if (state.stop.get() || closed) null else stopper.scheduleWithFixedDelay({
                         if (!state.stop.get() && state.done.count != 0L) {
                             val failure = when {
-                                !line.isOpen || !line.isRunning -> "The microphone stopped or disconnected. Audio received so far was saved."
+                                !line.isOpen -> "The microphone stopped or disconnected. Audio received so far was saved."
                                 System.nanoTime() - lastInput.get() >= TimeUnit.MILLISECONDS.toNanos(inputStallTimeoutMs) ->
                                     "The microphone stopped delivering audio samples. Check its connection and Windows microphone access. Audio received so far was saved."
                                 else -> null
@@ -226,7 +226,10 @@ class DesktopRecorder(
                 }
                 try {
                     while (!state.stop.get()) {
-                        check(line.isOpen && line.isRunning) { "The microphone stopped or disconnected. Audio received so far was saved." }
+                        // JavaSound may report isRunning=false until the first
+                        // read. Connectivity is determined by an open handle
+                        // and actual PCM arrivals, with the watchdog above.
+                        check(line.isOpen) { "The microphone stopped or disconnected. Audio received so far was saved." }
                         if (readAvailable() == 0) Thread.sleep(10)
                     }
                     // Stop production, then drain retained device data only while

@@ -541,8 +541,9 @@ class DesktopController(
         }
     }
     override fun installSpeakerModels() {
-        if (mutableState.value.speakerJob.active || mutableState.value.capture.active) return
-        mutableState.update { it.copy(speakerJob = it.speakerJob.copy(active = true, installing = true, message = "Preparing speaker models…")) }
+        if (closed || !ready || mutableState.value.speakerJob.active || mutableState.value.capture.active) return
+        mutableState.update { it.copy(speakerJob = it.speakerJob.copy(active = true, installing = true, failed = false,
+            fraction = null, message = "Preparing speaker models…")) }
         speakerJob = launchOperation {
             try {
                 speakerClient.installModels { progress -> mutableState.update { it.copy(speakerJob = it.speakerJob.copy(
@@ -551,14 +552,19 @@ class DesktopController(
             } catch (cancelled: CancellationException) {
                 mutableState.update { it.copy(speakerJob = it.speakerJob.copy(message = "Speaker setup canceled. You can retry.")) }
                 throw cancelled
+            } catch (failure: Throwable) {
+                mutableState.update { it.copy(speakerJob = it.speakerJob.copy(failed = true,
+                    message = failure.message?.take(1_500) ?: "Speaker setup failed. Your recordings are unchanged.")) }
+                throw failure
             } finally { mutableState.update { it.copy(speakerJob = it.speakerJob.copy(active = false, installing = false, fraction = null)) } }
         }
     }
     override fun analyzeSpeakers(recordingId: String, speakerCount: Int?) {
         val state = mutableState.value
-        if (state.capture.active || state.speakerJob.active) return
+        if (closed || !ready || state.capture.active || state.speakerJob.active) return
         if (!state.speakerJob.modelsInstalled) { showError("Download speaker models in Settings first."); return }
-        mutableState.update { it.copy(speakerJob = it.speakerJob.copy(recordingId = recordingId, active = true, fraction = null, message = "Finding speakers…")) }
+        mutableState.update { it.copy(speakerJob = it.speakerJob.copy(recordingId = recordingId, active = true, failed = false,
+            fraction = null, message = "Finding speakers…")) }
         speakerJob = launchOperation {
             try {
                 val document = withContext(Dispatchers.IO) { checkNotNull(store.document(recordingId)) }
@@ -587,6 +593,10 @@ class DesktopController(
             } catch (cancelled: CancellationException) {
                 mutableState.update { it.copy(speakerJob = it.speakerJob.copy(message = "Speaker analysis canceled. Your recording is saved.")) }
                 throw cancelled
+            } catch (failure: Throwable) {
+                mutableState.update { it.copy(speakerJob = it.speakerJob.copy(failed = true,
+                    message = failure.message?.take(1_500) ?: "Speaker analysis failed. Your recording is saved.")) }
+                throw failure
             } finally {
                 mutableState.update { it.copy(speakerJob = it.speakerJob.copy(active = false, recordingId = null, fraction = null)) }
             }

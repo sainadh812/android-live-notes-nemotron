@@ -164,6 +164,22 @@ class DesktopUiTest {
         compose.onNodeWithText("Saving…").assertIsNotEnabled()
     }
 
+    @Test fun failedSpeakerSetupKeepsItsMessageVisibleAndDoesNotBlockRecording() {
+        val actions = TestActions()
+        val message = "Speaker identification could not start. Review the security alert for speaker-worker.exe with your IT team."
+        show(AppState(downloads = SpeechModel.entries.map { DownloadView(it.id, installed = true) },
+            speakerJob = SpeakerJobView(message = message, failed = true)), actions)
+        compose.onNodeWithText("Start recording").assertIsEnabled()
+        compose.onNodeWithTag("nav-settings").performClick()
+        compose.onNodeWithTag("settings-page").performScrollToNode(hasTestTag("speaker-status"))
+        compose.onNodeWithTag("speaker-status").assertTextEquals(message)
+        screenshot("speaker-setup-error")
+        compose.onNodeWithText("Download speaker models").performScrollTo().performClick()
+        assertEquals(1, actions.speakerInstallCalls)
+        compose.onNodeWithTag("nav-record").performClick()
+        compose.onNodeWithText("Start recording").assertIsEnabled()
+    }
+
     private fun screenshot(name: String) {
         compose.waitForIdle()
         val image = compose.onRoot().captureToImage().toPixelMap()
@@ -209,6 +225,7 @@ class DesktopUiTest {
         var stopAudioCalls = 0
         var microphoneSettingsCalls = 0
         var soundSettingsCalls = 0
+        var speakerInstallCalls = 0
         var settings: AppSettings? = null
         override fun startRecording() = Unit
         override fun stopRecording() = Unit
@@ -243,7 +260,7 @@ class DesktopUiTest {
         override fun openModelDownloads() { openDownloadsCalls++ }
         override fun cancelModelDownload(modelId: String) { canceledModel = modelId }
         override fun removeModel(modelId: String) = Unit
-        override fun installSpeakerModels() = Unit
+        override fun installSpeakerModels() { speakerInstallCalls++ }
         override fun analyzeSpeakers(recordingId: String, speakerCount: Int?) { requestedCount = speakerCount }
         override fun cancelSpeakerJob() = Unit
         override fun renameSpeaker(recordingId: String, speakerId: String, name: String) = Unit

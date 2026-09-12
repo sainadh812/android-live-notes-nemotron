@@ -40,7 +40,9 @@ internal class AudioDiagnostics {
                 line.start()
                 while (System.nanoTime() - started < 10_000_000_000L) {
                     currentCoroutineContext().ensureActive()
-                    check(line.isOpen && line.isRunning) { "The microphone disconnected or stopped. Choose an available device and try again." }
+                    // start() permits I/O; some JavaSound lines become running
+                    // only on their first read. Measure frame arrivals instead.
+                    check(line.isOpen) { "The microphone disconnected or stopped. Choose an available device and try again." }
                     val available = minOf(line.available(), bytes.size) / frameSize * frameSize
                     if (available > 0) {
                         val count = line.read(bytes, 0, available)
@@ -87,7 +89,8 @@ internal class AudioDiagnostics {
                 line.start()
                 while (position < total || line.longFramePosition - epoch < position) {
                     currentCoroutineContext().ensureActive()
-                    check(line.isOpen && line.isRunning) { "The output device disconnected or stopped. Choose another speaker or headset." }
+                    // Playback can remain inactive until the first write.
+                    check(line.isOpen) { "The output device disconnected or stopped. Choose another speaker or headset." }
                     check(System.nanoTime() < deadline) { "The output device did not finish the test tone. Reconnect it or choose another output." }
                     val count = minOf(total - position, bytes.size / frameSize, line.available() / frameSize)
                     if (count > 0) {

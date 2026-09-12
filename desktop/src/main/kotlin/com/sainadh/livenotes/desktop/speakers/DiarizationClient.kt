@@ -8,16 +8,20 @@ import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.doubleOrNull
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
+import kotlinx.serialization.json.intOrNull
 import java.io.BufferedReader
+import java.io.IOException
 import java.nio.file.Files
 import java.nio.file.LinkOption
 import java.nio.file.Path
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicReference
+import java.util.concurrent.atomic.AtomicBoolean
 
 data class DiarizationProgress(val stage: String, val fraction: Double?, val message: String)
 
@@ -31,6 +35,11 @@ class DiarizationClient(
     private val json = Json { ignoreUnknownKeys = true }
     private val executable: Path get() = workerDirectory.resolve("speaker-worker.exe")
     val available: Boolean get() = Files.isRegularFile(executable, LinkOption.NOFOLLOW_LINKS)
+    // Set only by module-local tests; production always starts the packaged executable.
+    internal var startupTimeoutMs = 30_000L
+    internal var launchWorker: (List<String>, Path) -> Process = { command, directory ->
+        ProcessBuilder(command).directory(directory.toFile()).start()
+    }
 
     /** Cheap UI readiness hint. The worker also verifies every model's SHA-256 before use. */
     fun modelsInstalled(): Boolean = runCatching {
@@ -76,19 +85,29 @@ class DiarizationClient(
         onProgress: (DiarizationProgress) -> Unit,
         result: (Path) -> T,
     ): T = coroutineScope {
-        check(available) { "The speaker worker is missing. Reinstall the Windows app." }
+        check(available) { missingWorkerMessage() }
         Files.createDirectories(workDirectory)
         val job = Files.createTempDirectory(workDirectory, "speaker-job-")
         var process: Process? = null
         val descendants = linkedMapOf<Long, ProcessHandle>()
         try {
-            val command = mutableListOf(executable.toRealPath().toString())
-            command += arguments
-            command += listOf("--scratch", job.toAbsolutePath().toString())
-            if ("--analyze" in arguments) command += listOf("--output", job.resolve("result.json").toAbsolutePath().toString())
-            process = ProcessBuilder(command).directory(workerDirectory.toRealPath().toFile()).start()
-            process.outputStream.close()
-            val running = process
+            onProgress(DiarizationProgress("starting", null, "Starting the local speaker component…"))
+            process = try {
+                val command = mutableListOf(executable.toRealPath().toString())
+                command += arguments
+                command += listOf("--scratch", job.toAbsolutePath().toString())
+                if ("--analyze" in arguments) command += listOf("--output", job.resolve("result.json").toAbsolutePath().toString())
+                launchWorker(command, workerDirectory.toRealPath())
+            } catch (failure: IOException) {
+                throw IOException(if (!available) missingWorkerMessage() else launchFailureMessage(failure), failure)
+            } catch (failure: SecurityException) {
+                throw IOException("Windows denied access to speaker-worker.exe. ${securityHelp()}", failure)
+            }
+            val running = checkNotNull(process)
+            running.outputStream.close()
+            val startedAt = System.nanoTime()
+            val ready = AtomicBoolean(false)
+            val startupFailure = AtomicReference<String?>(null)
             val failure = AtomicReference<String?>(null)
             val stderrTail = StringBuilder()
             val stdout = async(Dispatchers.IO) {
@@ -97,6 +116,10 @@ class DiarizationClient(
                         val event = runCatching { json.parseToJsonElement(line).jsonObject }.getOrNull()
                             ?: return@readBoundedLines
                         when (event["event"]?.jsonPrimitive?.content) {
+                            "ready" -> {
+                                if (event["protocolVersion"]?.jsonPrimitive?.intOrNull == 1) ready.set(true)
+                                else startupFailure.set("The speaker component has an incompatible startup protocol. Use the complete matching Windows app package.")
+                            }
                             "error" -> failure.set(event["message"]?.jsonPrimitive?.content?.take(1_000))
                             "progress" -> {
                                 val fraction = event["fraction"]?.jsonPrimitive?.doubleOrNull
@@ -124,13 +147,24 @@ class DiarizationClient(
                 rememberDescendants(running, descendants)
                 if (running.waitFor(100, TimeUnit.MILLISECONDS)) break
                 currentCoroutineContext().ensureActive()
+                startupFailure.get()?.let { throw IOException(it) }
+                if (!ready.get() && TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - startedAt) >= startupTimeoutMs) {
+                    throw IOException("speaker-worker.exe did not become ready within ${startupTimeoutMs / 1_000} seconds. It may be blocked or unable to load its packaged files. ${securityHelp()}")
+                }
             }
             currentCoroutineContext().ensureActive()
-            stdout.await()
-            stderr.await()
-            check(running.exitValue() == 0) {
-                failure.get() ?: "Speaker analysis failed. ${stderrTail.toString().takeLast(500)}"
+            // An exited bootloader with inherited open pipes must not leave setup
+            // waiting forever. Cleanup below stops any remaining worker descendants.
+            check(withTimeoutOrNull(5_000) { stdout.await(); stderr.await(); true } == true) {
+                "The speaker component exited without closing its output. ${securityHelp()}"
             }
+            startupFailure.get()?.let { throw IOException(it) }
+            check(running.exitValue() == 0) {
+                failure.get() ?: if (!ready.get())
+                    "speaker-worker.exe stopped before it became ready (exit ${running.exitValue()}). ${securityHelp()} ${stderrTail.toString().takeLast(500)}"
+                else "Speaker analysis failed. ${stderrTail.toString().takeLast(500)}"
+            }
+            check(ready.get()) { "speaker-worker.exe exited without confirming startup. Use the complete matching Windows app package. ${securityHelp()}" }
             currentCoroutineContext().ensureActive()
             result(job)
         } finally {
@@ -146,6 +180,21 @@ class DiarizationClient(
                 runCatching { Files.deleteIfExists(modelsDirectory.resolve(it)) }
             }
         }
+    }
+
+    private fun missingWorkerMessage() = "The speaker component speaker-worker.exe is missing or unavailable. The app package may be incomplete, or security software may have removed it. ${securityHelp()}"
+
+    private fun securityHelp() = "Check your security software's event details and contact your IT/security team if it was blocked. Recording and transcription remain available."
+
+    private fun launchFailureMessage(failure: IOException): String {
+        val code = Regex("error=(\\d+)").find(failure.message.orEmpty())?.groupValues?.get(1)?.toIntOrNull()
+        val reason = when (code) {
+            225, 226 -> "Windows reported a security detection for speaker-worker.exe (error $code)."
+            5, 577, 1260 -> "Windows denied or blocked speaker-worker.exe (error $code)."
+            193, 216 -> "speaker-worker.exe is damaged or incompatible with this Windows installation (error $code)."
+            else -> "The speaker component speaker-worker.exe could not start."
+        }
+        return "$reason ${securityHelp()} ${failure.message.orEmpty().take(400)}".trim()
     }
 
     private fun rememberDescendants(process: Process, descendants: MutableMap<Long, ProcessHandle>) {

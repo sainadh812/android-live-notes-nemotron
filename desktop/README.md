@@ -7,7 +7,7 @@ recording libraries are separate.
 
 ## Install and record
 
-Download [Windows 1.0.2 Preview](https://github.com/sainadh812/android-live-notes-nemotron/releases/tag/windows-v1.0.2).
+Download [Windows 1.0.3 Preview](https://github.com/sainadh812/android-live-notes-nemotron/releases/tag/windows-v1.0.3).
 Use the Windows x64 EXE installer, or extract the portable ZIP and run
 `LiveMeetingNotes.exe` inside its folder. The package includes its Java runtime,
 native speech engine, and speaker worker; Java and Python installations are not
@@ -65,6 +65,35 @@ Capture reports disconnected or stalled devices and preserves captured audio.
 
 See [the Handy comparison](HANDY-COMPARISON.md) for what was adapted and what
 still differs, including the native audio backend and physical-device limitations.
+
+## Microphone and speaker startup
+
+Version 1.0.2 introduced a microphone startup regression: it checked JavaSound's
+`isRunning` before the first audio read. The Windows runtime can leave this flag
+false until that read, so an open, working microphone could be incorrectly
+reported as disconnected. Version 1.0.3 removes that gate from recording,
+playback, and device tests. It checks that the line is open and that actual audio
+frames arrive or advance within a bounded time. The disk-backed transcription
+backlog from 1.0.2 is retained. Existing models and saved meetings are retained.
+
+Speaker identification uses a separate `speaker-worker.exe`, including when
+**Download speaker models** is clicked. If security software quarantines or
+blocks this file or a dependency, speaker setup/analysis cannot run. The app now
+reports missing components and execution failures, requires the worker to report
+readiness within 30 seconds, and keeps setup errors visible in Settings. The
+startup deadline does not limit how long speaker analysis can run after startup.
+Speaker setup failure does not prevent microphone recording or speech transcription.
+
+An antivirus alert is not established to be a false positive by a successful
+build or matching checksum. The worker is built from the checked-in Python source
+and pinned dependencies in [speaker-worker/](speaker-worker/); the release's
+`speaker-worker-details.txt` records its exact hash, size, source commit, and
+signature status for investigation. If Sentinel or another security product
+blocks it, retain the detection name, flagged path/hash, and release version and
+have the IT/security team review them through the product's support process.
+Do not disable endpoint protection or restore a flagged file without that review.
+The app does not change security policies or relaunch the worker automatically
+at startup. Sentinel approval cannot be verified by the automated build runner.
 
 ## Speech model downloads and imports
 
