@@ -1,0 +1,34 @@
+name: Mirror speech models to GitHub
+on:
+  push:
+    branches: [feature/windows-github-models]
+    paths: ['desktop/model-mirror/**', '.github/workflows/model-mirror.yml']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: speech-model-mirror-v1
+  cancel-in-progress: false
+
+jobs:
+  mirror:
+    if: github.repository == 'sainadh812/android-live-notes-nemotron'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: '3.11'
+      - name: Fetch pinned weights and required attribution
+        run: python desktop/model-mirror/prepare.py --output "$RUNNER_TEMP/model-mirror"
+      - name: Verify uploads and publish complete model release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python desktop/model-mirror/publish.py --assets "$RUNNER_TEMP/model-mirror"

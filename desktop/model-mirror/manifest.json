@@ -1,0 +1,198 @@
+{
+  "schemaVersion": 1,
+  "releaseTag": "models-v1",
+  "verifiedAgainst": "app/src/main/java/com/sainadh/livenotes/stt/SpeechModel.kt",
+  "models": [
+    {
+      "id": "moonshine-tiny",
+      "title": "Moonshine Tiny",
+      "fileName": "moonshine-streaming-tiny-Q8_0.gguf",
+      "url": "https://huggingface.co/handy-computer/moonshine-streaming-tiny-gguf/resolve/85ddff612fa3a2cf40b2f745abcfa90ef82f293b/moonshine-streaming-tiny-Q8_0.gguf",
+      "repository": "handy-computer/moonshine-streaming-tiny-gguf",
+      "revision": "85ddff612fa3a2cf40b2f745abcfa90ef82f293b",
+      "bytes": 50462816,
+      "sha256": "930e4622ad3a24158b91406c30c977fa6a26b34cb32d6ac3e57cfb23383a869e",
+      "license": "MIT",
+      "upstreamRepository": "UsefulSensors/moonshine-streaming-tiny",
+      "upstreamRevision": "f8e9dfd8c562c257c151a907b7b7f2fe8ff8511a",
+      "attributionFiles": [
+        "Notice.txt",
+        "licenses/moonshine-original-LICENSE.txt",
+        "model-cards/moonshine-tiny-conversion.md",
+        "model-cards/moonshine-tiny-original.md"
+      ]
+    },
+    {
+      "id": "nemotron-english",
+      "title": "Nemotron English",
+      "fileName": "nemotron-speech-streaming-en-0.6b-Q4_K_M.gguf",
+      "url": "https://huggingface.co/handy-computer/nemotron-speech-streaming-en-0.6b-gguf/resolve/7d9b719206789e4068d87c6398262ab4dfd4e45d/nemotron-speech-streaming-en-0.6b-Q4_K_M.gguf",
+      "repository": "handy-computer/nemotron-speech-streaming-en-0.6b-gguf",
+      "revision": "7d9b719206789e4068d87c6398262ab4dfd4e45d",
+      "bytes": 475436032,
+      "sha256": "dc959ca31499b114e395c44eb4f0778968f20e5cfb03305a08a39925b2da8e1e",
+      "license": "NVIDIA-Open-Model-License",
+      "upstreamRepository": "nvidia/nemotron-speech-streaming-en-0.6b",
+      "upstreamRevision": "ef3bf40c90df5cd2de55cc07e06681e03d8e6ee4",
+      "attributionFiles": [
+        "Notice.txt",
+        "licenses/NVIDIA-Open-Model-License.txt",
+        "model-cards/nemotron-english-conversion.md",
+        "model-cards/nemotron-english-original.md",
+        "licenses/NVIDIA-Trustworthy-AI-Terms.txt"
+      ]
+    },
+    {
+      "id": "nemotron-q4",
+      "title": "Nemotron 3.5 · Compact",
+      "fileName": "nemotron-3.5-asr-streaming-0.6b-Q4_K_M.gguf",
+      "url": "https://huggingface.co/handy-computer/nemotron-3.5-asr-streaming-0.6b-gguf/resolve/6d44e540bc31b0de1dbe174a3cea87f53a7f22fb/nemotron-3.5-asr-streaming-0.6b-Q4_K_M.gguf",
+      "repository": "handy-computer/nemotron-3.5-asr-streaming-0.6b-gguf",
+      "revision": "6d44e540bc31b0de1dbe174a3cea87f53a7f22fb",
+      "bytes": 495831520,
+      "sha256": "41c99fa5fb6f3d35f68e79adc3e755eca2232a8d921178bd647b71194792b8fd",
+      "license": "OpenMDW-1.1",
+      "upstreamRepository": "nvidia/nemotron-3.5-asr-streaming-0.6b",
+      "upstreamRevision": "24b151a851dd15909e1fc611b11bb2da52b9fc81",
+      "attributionFiles": [
+        "Notice.txt",
+        "licenses/OpenMDW-1.1.txt",
+        "model-cards/nemotron-3.5-conversion.md",
+        "model-cards/nemotron-3.5-original.md"
+      ]
+    },
+    {
+      "id": "nemotron-q8",
+      "title": "Nemotron 3.5 · Full",
+      "fileName": "nemotron-3.5-asr-streaming-0.6b-Q8_0.gguf",
+      "url": "https://huggingface.co/handy-computer/nemotron-3.5-asr-streaming-0.6b-gguf/resolve/6d44e540bc31b0de1dbe174a3cea87f53a7f22fb/nemotron-3.5-asr-streaming-0.6b-Q8_0.gguf",
+      "repository": "handy-computer/nemotron-3.5-asr-streaming-0.6b-gguf",
+      "revision": "6d44e540bc31b0de1dbe174a3cea87f53a7f22fb",
+      "bytes": 751094240,
+      "sha256": "b94545b313b3223fda7b2857a52681da813935c2127643d1e9ff0c23d988089c",
+      "license": "OpenMDW-1.1",
+      "upstreamRepository": "nvidia/nemotron-3.5-asr-streaming-0.6b",
+      "upstreamRevision": "24b151a851dd15909e1fc611b11bb2da52b9fc81",
+      "attributionFiles": [
+        "Notice.txt",
+        "licenses/OpenMDW-1.1.txt",
+        "model-cards/nemotron-3.5-conversion.md",
+        "model-cards/nemotron-3.5-original.md"
+      ]
+    },
+    {
+      "id": "nemotron-q6",
+      "title": "Nemotron 3.5 · Q6",
+      "fileName": "nemotron-3.5-asr-streaming-0.6b-Q6_K.gguf",
+      "url": "https://huggingface.co/handy-computer/nemotron-3.5-asr-streaming-0.6b-gguf/resolve/6d44e540bc31b0de1dbe174a3cea87f53a7f22fb/nemotron-3.5-asr-streaming-0.6b-Q6_K.gguf",
+      "repository": "handy-computer/nemotron-3.5-asr-streaming-0.6b-gguf",
+      "revision": "6d44e540bc31b0de1dbe174a3cea87f53a7f22fb",
+      "bytes": 621356512,
+      "sha256": "4ff802c6207c4a7df23242003fd2aa849a1ab02bba6bc80c3db02e7e82606c28",
+      "license": "OpenMDW-1.1",
+      "upstreamRepository": "nvidia/nemotron-3.5-asr-streaming-0.6b",
+      "upstreamRevision": "24b151a851dd15909e1fc611b11bb2da52b9fc81",
+      "attributionFiles": [
+        "Notice.txt",
+        "licenses/OpenMDW-1.1.txt",
+        "model-cards/nemotron-3.5-conversion.md",
+        "model-cards/nemotron-3.5-original.md"
+      ]
+    },
+    {
+      "id": "nemotron-q5",
+      "title": "Nemotron 3.5 · Q5",
+      "fileName": "nemotron-3.5-asr-streaming-0.6b-Q5_K_M.gguf",
+      "url": "https://huggingface.co/handy-computer/nemotron-3.5-asr-streaming-0.6b-gguf/resolve/6d44e540bc31b0de1dbe174a3cea87f53a7f22fb/nemotron-3.5-asr-streaming-0.6b-Q5_K_M.gguf",
+      "repository": "handy-computer/nemotron-3.5-asr-streaming-0.6b-gguf",
+      "revision": "6d44e540bc31b0de1dbe174a3cea87f53a7f22fb",
+      "bytes": 559647200,
+      "sha256": "86429e8c4f7fdcf9b3312269ad1ca6669478ba7805331c4aea7a2e33e9910d65",
+      "license": "OpenMDW-1.1",
+      "upstreamRepository": "nvidia/nemotron-3.5-asr-streaming-0.6b",
+      "upstreamRevision": "24b151a851dd15909e1fc611b11bb2da52b9fc81",
+      "attributionFiles": [
+        "Notice.txt",
+        "licenses/OpenMDW-1.1.txt",
+        "model-cards/nemotron-3.5-conversion.md",
+        "model-cards/nemotron-3.5-original.md"
+      ]
+    }
+  ],
+  "documents": [
+    {
+      "fileName": "model-cards/moonshine-tiny-conversion.md",
+      "url": "https://huggingface.co/handy-computer/moonshine-streaming-tiny-gguf/resolve/85ddff612fa3a2cf40b2f745abcfa90ef82f293b/README.md",
+      "repository": "handy-computer/moonshine-streaming-tiny-gguf",
+      "revision": "85ddff612fa3a2cf40b2f745abcfa90ef82f293b",
+      "expectedLicense": "mit"
+    },
+    {
+      "fileName": "model-cards/moonshine-tiny-original.md",
+      "url": "https://huggingface.co/UsefulSensors/moonshine-streaming-tiny/resolve/f8e9dfd8c562c257c151a907b7b7f2fe8ff8511a/README.md",
+      "repository": "UsefulSensors/moonshine-streaming-tiny",
+      "revision": "f8e9dfd8c562c257c151a907b7b7f2fe8ff8511a",
+      "expectedLicense": "mit"
+    },
+    {
+      "fileName": "model-cards/nemotron-english-conversion.md",
+      "url": "https://huggingface.co/handy-computer/nemotron-speech-streaming-en-0.6b-gguf/resolve/7d9b719206789e4068d87c6398262ab4dfd4e45d/README.md",
+      "repository": "handy-computer/nemotron-speech-streaming-en-0.6b-gguf",
+      "revision": "7d9b719206789e4068d87c6398262ab4dfd4e45d",
+      "expectedLicense": "nvidia-open-model-license"
+    },
+    {
+      "fileName": "model-cards/nemotron-english-original.md",
+      "url": "https://huggingface.co/nvidia/nemotron-speech-streaming-en-0.6b/resolve/ef3bf40c90df5cd2de55cc07e06681e03d8e6ee4/README.md",
+      "repository": "nvidia/nemotron-speech-streaming-en-0.6b",
+      "revision": "ef3bf40c90df5cd2de55cc07e06681e03d8e6ee4",
+      "expectedLicense": "nvidia-open-model-license"
+    },
+    {
+      "fileName": "model-cards/nemotron-3.5-conversion.md",
+      "url": "https://huggingface.co/handy-computer/nemotron-3.5-asr-streaming-0.6b-gguf/resolve/6d44e540bc31b0de1dbe174a3cea87f53a7f22fb/README.md",
+      "repository": "handy-computer/nemotron-3.5-asr-streaming-0.6b-gguf",
+      "revision": "6d44e540bc31b0de1dbe174a3cea87f53a7f22fb",
+      "expectedLicense": "openmdw-1.1"
+    },
+    {
+      "fileName": "model-cards/nemotron-3.5-original.md",
+      "url": "https://huggingface.co/nvidia/nemotron-3.5-asr-streaming-0.6b/resolve/24b151a851dd15909e1fc611b11bb2da52b9fc81/README.md",
+      "repository": "nvidia/nemotron-3.5-asr-streaming-0.6b",
+      "revision": "24b151a851dd15909e1fc611b11bb2da52b9fc81",
+      "expectedLicense": "openmdw-1.1"
+    }
+  ],
+  "localAttribution": [
+    {
+      "fileName": "Notice.txt",
+      "bytes": 1448,
+      "sha256": "53988ff5e937b0b4dbe533e254ca0c6aeddb7169ed2978946b19bc41625823f2"
+    },
+    {
+      "fileName": "licenses/NVIDIA-Open-Model-License.txt",
+      "bytes": 10355,
+      "sha256": "fe88d1d6c0284ea4ea2f2fcc2ee19b2b9da51c5ae22e06a32e1743a561eef202"
+    },
+    {
+      "fileName": "licenses/NVIDIA-Trustworthy-AI-Terms.txt",
+      "bytes": 1020,
+      "sha256": "7801e970f7b39a1ee3c6f913cbd3ef7abb554dab39c3f6c37317a3539361cc84"
+    },
+    {
+      "fileName": "licenses/OpenMDW-1.1.txt",
+      "bytes": 2623,
+      "sha256": "4045c5277fd1996e3f705a6bb62834230ce899cc988c00c94f2e3c914c21c066"
+    },
+    {
+      "fileName": "licenses/SOURCES.md",
+      "bytes": 3104,
+      "sha256": "65f90c272097f4d557d80c5555e8d32d0c7d5117fe92b8c0e60e61ea1bbfd317"
+    },
+    {
+      "fileName": "licenses/moonshine-original-LICENSE.txt",
+      "bytes": 14180,
+      "sha256": "fa7d1174dd8af6a7cd280be20b80d10095ed4c19b5b20b61a7715c3ad790dc5f"
+    }
+  ]
+}

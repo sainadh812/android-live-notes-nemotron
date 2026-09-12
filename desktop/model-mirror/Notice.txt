@@ -1,0 +1,27 @@
+Live Meeting Notes speech model mirror
+
+These GGUF files are unchanged copies of conversions published by Handy
+(handy-computer). Original models were developed by Useful Sensors, Inc.
+(Moonshine AI) and NVIDIA Corporation. The mirror does not train, quantize,
+fine-tune, modify or claim authorship of these files. Exact source repositories,
+revisions, filenames, sizes and SHA-256 digests are recorded in manifest.json.
+
+Moonshine Streaming Tiny:
+Copyright (c) 2025 Useful Sensors, Inc. (dba Moonshine AI)
+Licensed under the MIT License, as stated in the original model card and
+SECTION 1 of licenses/moonshine-original-LICENSE.txt. The upstream license
+explicitly places all streaming models under MIT; its separate community
+license section concerns other legacy models that are not included here.
+
+Nemotron Speech Streaming EN 0.6B:
+Licensed by NVIDIA Corporation under the NVIDIA Open Model License
+See licenses/NVIDIA-Open-Model-License.txt and the incorporated NVIDIA
+Trustworthy AI terms in licenses/NVIDIA-Trustworthy-AI-Terms.txt.
+
+Nemotron 3.5 ASR Streaming 0.6B (Q4, Q5, Q6 and Q8):
+Original model by NVIDIA Corporation. Licensed under OpenMDW-1.1.
+See licenses/OpenMDW-1.1.txt and the original model card.
+
+The complete original and conversion model cards are included in model-cards/.
+Keep this Notice.txt, the relevant licenses and model origin notices with
+redistributed model copies. No NVIDIA or Moonshine endorsement is implied.
