@@ -214,7 +214,8 @@ private fun RecordPage(state: AppState, actions: DesktopActions, onSettings: () 
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(14.dp), verticalAlignment = Alignment.CenterVertically) {
                         Button(onClick = if (capture.active) actions::stopRecording else actions::startRecording,
                             enabled = capture.phase != CapturePhase.SAVING && (capture.active || (ready && !busyWithSpeakers)),
-                            colors = ButtonDefaults.buttonColors(containerColor = if (capture.active) Color(0xFFFFDFCE) else Accent, contentColor = Ink),
+                            colors = ButtonDefaults.buttonColors(containerColor = if (capture.active) Color(0xFFFFDFCE) else Accent, contentColor = Ink,
+                                disabledContainerColor = Color.White.copy(alpha = 0.12f), disabledContentColor = Mint.copy(alpha = 0.7f)),
                             shape = RoundedCornerShape(15.dp), contentPadding = PaddingValues(horizontal = 22.dp, vertical = 16.dp)) {
                             Icon(if (capture.active) Icons.Default.Stop else Icons.Default.Mic, null, modifier = Modifier.size(20.dp))
                             Spacer(Modifier.width(10.dp))

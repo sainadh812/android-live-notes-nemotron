@@ -19,6 +19,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Window
+import androidx.compose.ui.window.WindowPosition
 import androidx.compose.ui.window.application
 import androidx.compose.ui.window.rememberWindowState
 import com.sainadh.livenotes.desktop.data.AppPaths
@@ -31,8 +32,10 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
 import java.awt.Dimension
+import java.awt.GraphicsEnvironment
 import java.awt.Rectangle
 import java.awt.Robot
+import java.awt.Toolkit
 import java.io.File
 import javax.imageio.ImageIO
 import javax.swing.JOptionPane
@@ -59,6 +62,19 @@ fun main(args: Array<String>) {
         val state by controller.state.collectAsState()
         val scope = rememberCoroutineScope()
         var closing by remember { mutableStateOf(false) }
+        val initialBounds = remember {
+            val screen = GraphicsEnvironment.getLocalGraphicsEnvironment().defaultScreenDevice.defaultConfiguration
+            val screenBounds = screen.bounds
+            val insets = Toolkit.getDefaultToolkit().getScreenInsets(screen)
+            val workArea = Rectangle(screenBounds.x + insets.left, screenBounds.y + insets.top,
+                screenBounds.width - insets.left - insets.right, screenBounds.height - insets.top - insets.bottom)
+            // AWT screen coordinates are logical desktop units, including on scaled displays.
+            // Keep a small margin where possible, without reducing the supported minimum size.
+            val width = (workArea.width - 24).coerceIn(900, 1200)
+            val height = (workArea.height - 24).coerceIn(640, 820)
+            Rectangle(workArea.x + ((workArea.width - width) / 2).coerceAtLeast(0),
+                workArea.y + ((workArea.height - height) / 2).coerceAtLeast(0), width, height)
+        }
         fun closeWindow() {
             if (closing) return
             closing = true
@@ -70,7 +86,8 @@ fun main(args: Array<String>) {
         Window(
             onCloseRequest = ::closeWindow,
             title = "LiveMeetingNotes",
-            state = rememberWindowState(width = 1200.dp, height = 820.dp)
+            state = rememberWindowState(width = initialBounds.width.dp, height = initialBounds.height.dp,
+                position = WindowPosition(initialBounds.x.dp, initialBounds.y.dp))
         ) {
             LaunchedEffect(Unit) { window.minimumSize = Dimension(900, 640) }
             MaterialTheme {
