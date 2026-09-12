@@ -8,6 +8,7 @@ import tempfile
 from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
+from urllib.parse import urlparse
 
 spec = importlib.util.spec_from_file_location("worker", Path(__file__).parents[1] / "worker.py")
 worker = importlib.util.module_from_spec(spec)
@@ -15,6 +16,15 @@ spec.loader.exec_module(worker)
 
 
 class WorkerTests(unittest.TestCase):
+    def test_model_sources_use_public_downloads_without_api_quota(self):
+        for entry in worker.MANIFEST["files"]:
+            source = urlparse(entry["sourceUrl"])
+            self.assertEqual("https", source.scheme)
+            self.assertEqual("github.com", source.netloc)
+            self.assertTrue(source.path.startswith("/k2-fsa/sherpa-onnx/releases/download/"))
+            self.assertEqual("", source.query)
+            self.assertIsInstance(entry["githubAssetId"], int)
+
     def test_unknown_count_does_not_cap_twenty_speakers(self):
         segments = [SimpleNamespace(start=i, end=i + 0.8, speaker=50 - i) for i in range(23)]
         result = worker.result_from_segments(reversed(segments), 23000)
@@ -52,6 +62,10 @@ class WorkerTests(unittest.TestCase):
             with patch.object(worker.urllib.request, "urlopen", return_value=io.BytesIO(payload)) as download:
                 worker.install_models(root / "models", scratch)
                 self.assertEqual(1, download.call_count)
+                request = download.call_args.args[0]
+                self.assertEqual(entry["sourceUrl"], request.full_url)
+                self.assertFalse(any(name.lower() in ("authorization", "x-github-api-version")
+                                     for name in request.headers))
                 worker.install_models(root / "models", scratch)
                 self.assertEqual(1, download.call_count)
             self.assertEqual("test-model-set", json.loads((root / "models/ready.json").read_text())["modelSet"])

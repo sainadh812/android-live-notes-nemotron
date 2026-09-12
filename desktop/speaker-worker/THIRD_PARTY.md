@@ -21,8 +21,10 @@ The conversion was performed upstream; this app does not alter the downloaded we
 Sherpa's pinned [Windows CPU build configuration](https://github.com/k2-fsa/sherpa-onnx/blob/v1.12.26/cmake/onnxruntime-win-x64.cmake)
 selects ONNX Runtime 1.23.2. Its MIT license and complete upstream dependency
 notices are reproduced from that source tag in `licenses/`.
-`models.json` pins immutable GitHub asset IDs, sizes, archive member and SHA-256
-for both source downloads and installed model files. The original segmentation
+`models.json` uses public GitHub release download URLs and records the original
+asset IDs for provenance. Exact sizes, archive member and SHA-256 pin both source
+downloads and installed model files; the app needs no GitHub API token or quota.
+The original segmentation
 archive contains the float32 and int8 variants; we install float32 only.
 
 The [official diarization documentation](https://k2-fsa.github.io/sherpa/onnx/speaker-diarization/models.html)

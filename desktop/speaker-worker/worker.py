@@ -69,7 +69,8 @@ def install_models(models: Path, scratch: Path) -> None:
     (models / "ready.json").unlink(missing_ok=True)
     total = sum(entry["sourceSize"] for entry in MANIFEST["files"])
     completed = 0
-    # Immutable GitHub asset IDs plus exact length and SHA-256 pin both downloads.
+    # Public release downloads avoid unauthenticated GitHub API rate limits.
+    # Exact lengths and SHA-256 pin the accepted bytes if a release asset changes.
     for entry in MANIFEST["files"]:
         destination = models / entry["name"]
         if valid_model(destination, entry):
@@ -79,7 +80,6 @@ def install_models(models: Path, scratch: Path) -> None:
         archive = scratch / (entry["name"] + ".download")
         request = urllib.request.Request(entry["sourceUrl"], headers={
             "Accept": "application/octet-stream",
-            "X-GitHub-Api-Version": "2022-11-28",
             "User-Agent": "Live-Meeting-Notes-Desktop/1.0",
         })
         progress("download", completed / total, "Downloading speaker models")

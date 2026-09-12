@@ -4,7 +4,8 @@
   "files": [
     {
       "name": "segmentation.onnx",
-      "sourceUrl": "https://api.github.com/repos/k2-fsa/sherpa-onnx/releases/assets/197666131",
+      "sourceUrl": "https://github.com/k2-fsa/sherpa-onnx/releases/download/speaker-segmentation-models/sherpa-onnx-pyannote-segmentation-3-0.tar.bz2",
+      "githubAssetId": 197666131,
       "sourceSha256": "24615ee884c897d9d2ba09bb4d30da6bb1b15e685065962db5b02e76e4996488",
       "sourceSize": 6958444,
       "archiveMember": "sherpa-onnx-pyannote-segmentation-3-0/model.onnx",
@@ -15,7 +16,8 @@
     },
     {
       "name": "embedding.onnx",
-      "sourceUrl": "https://api.github.com/repos/k2-fsa/sherpa-onnx/releases/assets/198917204",
+      "sourceUrl": "https://github.com/k2-fsa/sherpa-onnx/releases/download/speaker-recongition-models/nemo_en_titanet_small.onnx",
+      "githubAssetId": 198917204,
       "sourceSha256": "ad4a1802485d8b34c722d2a9d04249662f2ece5d28a7a039063ca22f515a789e",
       "sourceSize": 40257283,
       "sha256": "ad4a1802485d8b34c722d2a9d04249662f2ece5d28a7a039063ca22f515a789e",

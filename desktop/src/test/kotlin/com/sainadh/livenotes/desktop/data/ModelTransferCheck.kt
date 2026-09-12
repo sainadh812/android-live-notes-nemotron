@@ -33,12 +33,15 @@ object ModelTransferCheck {
             check(source.length() == model.expectedBytes && sha256(source) == model.sha256) { "Import changed its source file" }
             val result = FileTranscriber.transcribe(imported, File(evidence, "jfk.wav"), "en-US")
             val wordCount = result.wordTiming?.let { NativeWordTimingFile.parse(it).size } ?: 0
-            check(wordCount == 22 && "ask what you can do for your country" in result.text) {
-                "The imported model did not produce the expected transcript and word timings"
-            }
             println("duration_ms=${result.durationMs}")
             println("timed_words=$wordCount")
             println(result.text)
+            check(wordCount == 22) { "Expected 22 native word timings, received $wordCount; see transcript above" }
+            // The decoder capitalizes this sentence as "Ask". Match the previous
+            // Windows smoke check's case-insensitive phrase assertion.
+            check(result.text.contains("ask what you can do for your country", ignoreCase = true)) {
+                "The imported model did not produce the expected phrase; see transcript above"
+            }
             File(evidence, "model-transfer.json").writeText(buildJsonObject {
                 put("passed", true)
                 put("downloadUrl", ModelSources.downloadUrl(model))

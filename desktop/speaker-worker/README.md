@@ -43,7 +43,9 @@ speaker intervals are marked Overlapping. Analysis may mislabel similar voices,
 short contributions, distant microphones or simultaneous speech; users can
 correct turns and names. No benchmark claim is made for a 20-person meeting.
 
-Only model installation uses the network. Exact model sizes and SHA-256 values
+Only model installation uses the network. The public GitHub release download
+URLs require no account or API token and avoid the unauthenticated REST API rate
+limit. Exact model sizes and SHA-256 values
 are checked on installation and before every analysis. `ready.json` is written
 only after both models verify. The Kotlin client serializes jobs, captures
 bounded logs, kills the native process on cancellation, removes the unique
