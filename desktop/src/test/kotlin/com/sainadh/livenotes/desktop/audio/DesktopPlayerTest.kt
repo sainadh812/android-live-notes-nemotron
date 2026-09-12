@@ -6,13 +6,110 @@ import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import java.nio.file.Files
 import java.util.concurrent.LinkedBlockingQueue
+import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
+import javax.sound.sampled.AudioFormat
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Assert.fail
 import org.junit.Test
 
 class DesktopPlayerTest {
+    @Test fun stereoOutputAt48000KeepsSourceTimingAndReleasesOnPause() = withWav(ShortArray(16_000) { (it % 50 * 300).toShort() }) { file ->
+        val states = LinkedBlockingQueue<PlaybackState>()
+        val output = FakeOutputLine(AudioFormat(48_000f, 16, 2, true, false))
+        val player = DesktopPlayer { states.offer(it) }.apply { openOutput = { _, _ -> output.open() } }
+        try {
+            player.load(file); player.play()
+            awaitCondition { output.acceptedFrames.get() >= 48_000 }
+            val samples = decode(output.pcmBytes(), 8)
+            assertEquals(listOf(0, 0, 100, 100, 200, 200, 300, 300), samples)
+            // Queueing one second must not move the word highlight ahead of the device clock.
+            output.playedFrames.set(24_000)
+            awaitState(states) { it.isPlaying && it.positionMs in 499L..500L }
+            player.pause()
+            val paused = awaitState(states) { !it.isPlaying && it.positionMs in 499L..500L }
+            assertEquals(1_000L, paused.durationMs)
+            assertTrue(output.closed.await(1, TimeUnit.SECONDS))
+            player.unload()
+        } finally { player.close(); player.unload() }
+    }
+
+    @Test fun resumeReopensDefaultAndDeviceChangesKeepPositionWithoutRedundantReopen() = withWav(ShortArray(16_000)) { file ->
+        val states = LinkedBlockingQueue<PlaybackState>()
+        val opened = java.util.concurrent.CopyOnWriteArrayList<Pair<String?, FakeOutputLine>>()
+        val player = DesktopPlayer { states.offer(it) }.apply { openOutput = { id, _ ->
+            val output = FakeOutputLine(AudioFormat(if (opened.isEmpty()) 44_100f else 48_000f, 16, 2, true, false))
+            opened += id to output
+            output.open()
+        } }
+        try {
+            player.load(file); player.play()
+            awaitCondition { opened.firstOrNull()?.second?.acceptedFrames?.get()?.let { it >= 22_050 } == true }
+            val first = opened[0].second
+            first.playedFrames.set(11_025)
+            awaitState(states) { it.isPlaying && it.positionMs in 249L..250L }
+            player.pause()
+            awaitState(states) { !it.isPlaying && it.positionMs in 249L..250L }
+            assertTrue(first.closed.await(1, TimeUnit.SECONDS))
+            player.play()
+            awaitCondition { opened.size == 2 && opened[1].second.running }
+            assertEquals(null, opened[1].first)
+            player.setOutputDevice("headset")
+            awaitCondition { opened.size == 3 && opened[2].second.running }
+            assertEquals("headset", opened[2].first)
+            assertTrue(opened[1].second.closed.await(1, TimeUnit.SECONDS))
+            awaitState(states) { it.isPlaying && it.positionMs in 249L..250L }
+            player.setOutputDevice("headset")
+            Thread.sleep(100)
+            assertEquals(3, opened.size)
+            assertTrue(opened[2].second.running)
+            player.pause(); player.unload()
+        } finally { player.close(); player.unload() }
+    }
+
+    @Test fun changedRequestClosesDeviceThatFinishedOpeningLate() = withWav(ShortArray(16_000)) { file ->
+        val opening = CountDownLatch(1)
+        val release = CountDownLatch(1)
+        val states = LinkedBlockingQueue<PlaybackState>()
+        val output = FakeOutputLine(AudioFormat(48_000f, 16, 2, true, false))
+        val player = DesktopPlayer { states.offer(it) }.apply { openOutput = { _, _ ->
+            opening.countDown()
+            check(release.await(5, TimeUnit.SECONDS))
+            output.open()
+        } }
+        try {
+            player.load(file); player.play()
+            assertTrue(opening.await(5, TimeUnit.SECONDS))
+            player.pause(); release.countDown()
+            assertTrue(output.closed.await(5, TimeUnit.SECONDS))
+            awaitState(states) { it.file == file.absoluteFile && !it.isPlaying }
+            assertEquals(0L, output.acceptedFrames.get())
+            player.unload()
+        } finally { release.countDown(); player.close(); player.unload() }
+    }
+
+    @Test fun disconnectedPlaybackDeviceStopsAndReportsError() = withWav(ShortArray(16_000)) { file ->
+        val states = LinkedBlockingQueue<PlaybackState>()
+        val output = FakeOutputLine(AudioFormat(48_000f, 16, 2, true, false))
+        val player = DesktopPlayer { states.offer(it) }.apply { openOutput = { _, _ -> output.open() } }
+        try {
+            player.load(file); player.play()
+            awaitState(states) { it.isPlaying }
+            output.line.close()
+            val failed = awaitState(states) { it.error != null }
+            assertTrue(!failed.isPlaying)
+            assertTrue(failed.error!!.contains("disconnected"))
+            player.unload()
+        } finally { player.close(); player.unload() }
+    }
+
+    private fun awaitCondition(predicate: () -> Boolean) {
+        val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5)
+        while (!predicate() && System.nanoTime() < deadline) Thread.sleep(5)
+        assertTrue("Playback condition did not complete", predicate())
+    }
+
     @Test fun unloadReleasesFileAndPlayerCanLoadItAgain() = withWav(ShortArray(1600)) { file ->
         val states = LinkedBlockingQueue<PlaybackState>()
         val player = DesktopPlayer { states.offer(it) }

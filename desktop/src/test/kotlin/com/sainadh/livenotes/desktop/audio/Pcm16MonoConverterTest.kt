@@ -39,4 +39,16 @@ class Pcm16MonoConverterTest {
         assertTrue(output.size in 15_999..16_000)
         assertTrue(output.all { it == 4_000.toShort() })
     }
+
+    @Test fun narrowBand8000InputUpsamplesAcrossReadBoundaries() {
+        val input = bytes(ShortArray(8_000) { (it % 200 * 50).toShort() })
+        val whole = Pcm16MonoConverter(8_000, 1).convert(input, input.size)
+        val converter = Pcm16MonoConverter(8_000, 1)
+        val chunks = input.asList().chunked(514).flatMap { part ->
+            converter.convert(part.toByteArray(), part.size).toList()
+        }.toShortArray()
+        assertTrue(whole.size in 15_999..16_000)
+        assertArrayEquals(whole, chunks)
+        assertEquals(listOf<Short>(0, 25, 50, 75, 100), whole.take(5))
+    }
 }

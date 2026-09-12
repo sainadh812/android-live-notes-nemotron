@@ -14,7 +14,8 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class DesktopRecorderTest {
-    private class Microphone(frames: Int, val blockRead: Boolean = false) {
+    private class Microphone(frames: Int, val blockRead: Boolean = false, val sample: Short = 16_384,
+        val sampleAt: ((Int) -> Short)? = null) {
         val remaining = AtomicInteger(frames)
         val readFrames = AtomicInteger()
         val closed = CountDownLatch(1)
@@ -33,7 +34,10 @@ class DesktopRecorderTest {
                     val count = minOf(args!![2] as Int / 2, remaining.get())
                     val bytes = args[0] as ByteArray
                     val offset = args[1] as Int
-                    repeat(count) { bytes[offset + it * 2] = 0; bytes[offset + it * 2 + 1] = 64 }
+                    repeat(count) {
+                        val value = sampleAt?.invoke(readFrames.get() + it) ?: sample
+                        bytes[offset + it * 2] = value.toByte(); bytes[offset + it * 2 + 1] = (value.toInt() shr 8).toByte()
+                    }
                     remaining.addAndGet(-count)
                     readFrames.addAndGet(count)
                     if (remaining.get() == 0) emptied.countDown()
@@ -49,7 +53,8 @@ class DesktopRecorderTest {
         } as TargetDataLine
     }
 
-    private class Engine(val hold: Boolean = false, val fail: Boolean = false, val holdInit: Boolean = false) : SpeechNativeApi {
+    private class Engine(val hold: Boolean = false, val fail: Boolean = false, val holdInit: Boolean = false,
+        val expectedSample: Float = 0.5f, val expectedSampleAt: ((Int) -> Float)? = null) : SpeechNativeApi {
         val initEntered = CountDownLatch(1)
         val initRelease = CountDownLatch(if (holdInit) 1 else 0)
         val entered = CountDownLatch(1)
@@ -64,7 +69,9 @@ class DesktopRecorderTest {
             return 1L
         }
         override fun nativeFeedPcm(handle: Long, pcm: FloatArray): String? {
-            assertTrue(pcm.all { it == 0.5f })
+            pcm.forEachIndexed { index, sample ->
+                assertEquals(expectedSampleAt?.invoke(consumed.get() + index) ?: expectedSample, sample, 0f)
+            }
             consumed.addAndGet(pcm.size)
             entered.countDown()
             check(release.await(5, TimeUnit.SECONDS))
@@ -83,19 +90,24 @@ class DesktopRecorderTest {
         val output = File(directory, "meeting.wav")
         val finished = CountDownLatch(1)
         val updates = mutableListOf<TranscriptUpdate>()
+        val phases = java.util.concurrent.CopyOnWriteArrayList<String>()
+        val progress = java.util.concurrent.CopyOnWriteArrayList<Pair<Long, Long>>()
         @Volatile var error: String? = null
         @Volatile var saved: File? = null
         @Volatile var duration = 0L
         val recorder = DesktopRecorder(
             onTranscriptUpdate = { if (failUpdates) error("persistence channel closed") else updates += it },
-            onLevel = { _, _ -> }, onPhase = {},
+            onLevel = { _, _ -> }, onPhase = { phases += it },
             onFinished = { file, milliseconds, _, failure ->
                 check(engine.destroyed)
                 saved = file; duration = milliseconds; error = failure; finished.countDown()
-            }
+            }, onProgress = { captured, transcribed -> progress += captured to transcribed }
         ).apply { speech = engine; openMicrophone = { microphone.line } }
         fun start() = recorder.start(model, outputFile = output)
-        fun awaitFinished() { assertTrue("Recording did not finish", finished.await(5, TimeUnit.SECONDS)) }
+        fun awaitFinished() {
+            assertTrue("Recording did not finish", finished.await(5, TimeUnit.SECONDS))
+            assertTrue("Temporary PCM backlog was not removed", directory.listFiles().orEmpty().none { it.name.startsWith(".speech-backlog-") })
+        }
         fun assertAudio() {
             assertEquals(output, saved)
             assertEquals(44L + microphone.readFrames.get() * 2L, output.length())
@@ -140,18 +152,35 @@ class DesktopRecorderTest {
         }
     }
 
-    @Test fun boundedQueueOverflowRetainsSavedPcmAndReportsLoss() {
-        Fixture(Microphone(8_000), Engine(hold = true)).use { fixture ->
+    @Test fun captureContinuesBeyondOneMinuteWhileInferenceIsBlockedThenDrainsEverySampleInOrder() {
+        val frames = 16_000 * 65 + 123
+        val sampleAt: (Int) -> Short = { (it * 73 + 29).toShort() }
+        Fixture(Microphone(frames, sampleAt = sampleAt), Engine(hold = true,
+            expectedSampleAt = { sampleAt(it) / 32768f })).use { fixture ->
             fixture.start()
             assertTrue(fixture.engine.entered.await(5, TimeUnit.SECONDS))
-            fixture.microphone.remaining.addAndGet(30 * 8_000)
+            assertTrue("Capture stopped before reading the meeting", fixture.microphone.emptied.await(5, TimeUnit.SECONDS))
+            assertEquals(frames, fixture.microphone.readFrames.get())
+            assertEquals("Slow inference must not close the microphone", 1L, fixture.microphone.closed.count)
+            assertEquals(1L, fixture.finished.count)
+            fixture.recorder.stop()
             assertTrue(fixture.microphone.closed.await(5, TimeUnit.SECONDS))
+            assertEquals("Stop must wait for inference to catch up", 1L, fixture.finished.count)
             fixture.engine.release.countDown()
             fixture.awaitFinished()
             fixture.assertAudio()
-            assertTrue(fixture.error.orEmpty().contains("could not keep up"))
-            assertTrue(fixture.engine.consumed.get() <= 21 * 8_000)
-            assertTrue(fixture.microphone.readFrames.get() > fixture.engine.consumed.get())
+            assertNull(fixture.error)
+            assertEquals(frames, fixture.engine.consumed.get())
+            assertTrue(fixture.progress.any { (captured, transcribed) -> captured - transcribed > 60_000 })
+            assertEquals(frames * 1000L / 16_000, fixture.progress.last().first)
+            assertEquals(fixture.progress.last().first, fixture.progress.last().second)
+            assertTrue(fixture.progress.all { (captured, transcribed) -> captured >= transcribed })
+            val bytes = fixture.output.readBytes()
+            repeat(frames) { index ->
+                val value = ((bytes[44 + index * 2].toInt() and 255) or
+                    (bytes[45 + index * 2].toInt() shl 8)).toShort()
+                assertEquals("Saved PCM sample $index", sampleAt(index), value)
+            }
         }
     }
 
@@ -188,6 +217,57 @@ class DesktopRecorderTest {
             fixture.awaitFinished()
             fixture.assertAudio()
             assertTrue(fixture.error.orEmpty().contains("persistence channel closed"))
+        }
+    }
+
+    @Test fun disconnectedMicrophonePreservesAudioAndFinalPartialInferenceChunk() {
+        Fixture(Microphone(9_123), Engine()).use { fixture ->
+            fixture.start()
+            assertTrue(fixture.microphone.emptied.await(5, TimeUnit.SECONDS))
+            fixture.microphone.line.close()
+            fixture.awaitFinished()
+            fixture.assertAudio()
+            assertEquals(9_123, fixture.engine.consumed.get())
+            assertTrue(fixture.error.orEmpty().contains("disconnected"))
+        }
+    }
+
+    @Test fun stoppedSampleDeliveryEndsCaptureAndPreservesReceivedAudio() {
+        Fixture(Microphone(9_123), Engine()).use { fixture ->
+            fixture.recorder.inputStallTimeoutMs = 100
+            fixture.start()
+            fixture.awaitFinished()
+            fixture.assertAudio()
+            assertEquals(9_123, fixture.engine.consumed.get())
+            assertTrue(fixture.error.orEmpty().contains("delivering audio samples"))
+        }
+    }
+
+    @Test fun microphoneWithoutFirstSamplesNeverReportsRecording() {
+        Fixture(Microphone(0), Engine()).use { fixture ->
+            fixture.recorder.inputStallTimeoutMs = 100
+            fixture.start()
+            fixture.awaitFinished()
+            assertFalse(fixture.phases.contains("recording"))
+            assertNull(fixture.saved)
+            assertTrue(fixture.error.orEmpty().contains("delivering audio samples"))
+        }
+    }
+
+    @Test fun silentPcmKeepsCaptureAliveWhileSamplesContinueArriving() {
+        Fixture(Microphone(8_000, sample = 0), Engine(expectedSample = 0f)).use { fixture ->
+            fixture.recorder.inputStallTimeoutMs = 400
+            fixture.start()
+            assertTrue(fixture.microphone.emptied.await(5, TimeUnit.SECONDS))
+            repeat(6) {
+                fixture.microphone.remaining.addAndGet(1600)
+                Thread.sleep(100)
+                assertEquals(1L, fixture.finished.count)
+            }
+            fixture.recorder.stop()
+            fixture.awaitFinished()
+            fixture.assertAudio()
+            assertNull(fixture.error)
         }
     }
 }

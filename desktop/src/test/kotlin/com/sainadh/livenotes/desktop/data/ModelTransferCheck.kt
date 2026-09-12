@@ -1,6 +1,7 @@
 package com.sainadh.livenotes.desktop.data
 
 import com.sainadh.livenotes.desktop.stt.FileTranscriber
+import com.sainadh.livenotes.desktop.stt.RecorderBacklogCheck
 import com.sainadh.livenotes.stt.NativeWordTimingFile
 import com.sainadh.livenotes.stt.SpeechModel
 import kotlinx.coroutines.runBlocking
@@ -42,6 +43,7 @@ object ModelTransferCheck {
             check(result.text.contains("ask what you can do for your country", ignoreCase = true)) {
                 "The imported model did not produce the expected phrase; see transcript above"
             }
+            RecorderBacklogCheck.verify(imported, File(evidence, "jfk.wav"), evidence)
             File(evidence, "model-transfer.json").writeText(buildJsonObject {
                 put("passed", true)
                 put("downloadUrl", ModelSources.downloadUrl(model))

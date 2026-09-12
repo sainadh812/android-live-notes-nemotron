@@ -7,7 +7,6 @@ import java.util.concurrent.ExecutionException
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.TimeoutException
 import javax.sound.sampled.AudioFormat
-import javax.sound.sampled.AudioSystem
 import javax.sound.sampled.SourceDataLine
 import kotlin.math.floor
 import kotlin.math.roundToInt
@@ -25,8 +24,11 @@ data class PlaybackState(
  * Speed uses linear resampling, so changing speed also changes pitch.
  */
 class DesktopPlayer(private val onState: (PlaybackState) -> Unit) : AutoCloseable {
+    internal var openOutput: (String?, Int) -> SourceDataLine = AudioDevices::openOutput
+    internal var outputStallTimeoutMs = 5_000L
     private data class Request(
         val file: File? = null, val playing: Boolean = false,
+        val outputDeviceId: String? = null,
         val seek: Long? = null, val speed: Float = 1f, val revision: Long = 0,
     )
     private val lock = Object()
@@ -43,6 +45,9 @@ class DesktopPlayer(private val onState: (PlaybackState) -> Unit) : AutoCloseabl
     fun load(file: File) = update { copy(file = file.absoluteFile, playing = false, seek = 0) }
     fun play() = update { copy(playing = true) }
     fun pause() = update(ignoreIfUnloading = true) { copy(playing = false) }
+    fun setOutputDevice(id: String?) {
+        synchronized(lock) { if (request.outputDeviceId != id) update { copy(outputDeviceId = id) } }
+    }
     fun seekTo(positionMs: Long) = update { copy(seek = positionMs.coerceAtLeast(0)) }
     fun setSpeed(speed: Float) {
         require(speed.isFinite() && speed in 0.5f..2f) { "Speed must be between 0.5 and 2" }
@@ -106,13 +111,17 @@ class DesktopPlayer(private val onState: (PlaybackState) -> Unit) : AutoCloseabl
         var epochSample = 0.0
         var epochFrame = 0L
         var queuedFrames = 0L
+        var sourceFramesPerOutputFrame = 1.0
+        var lastOutputFrame = 0L
+        var lastOutputProgress = 0L
         var playing = false
         var nextPublish = 0L
-        val bytes = ByteArray(2048)
+        val bytes = ByteArray(4096)
 
         fun audiblePosition(): Double = if (playing && line != null) {
-            (epochSample + (line!!.longFramePosition - epochFrame).coerceAtLeast(0) * current.speed)
-                .coerceAtMost(reader?.frameCount?.toDouble() ?: 0.0)
+            val frame = runCatching { line!!.longFramePosition }.getOrDefault(lastOutputFrame)
+            (epochSample + (maxOf(frame, lastOutputFrame) - epochFrame).coerceAtLeast(0) * sourceFramesPerOutputFrame)
+                .coerceAtMost(position)
         } else position
 
         fun publish(error: String? = null) {
@@ -144,10 +153,16 @@ class DesktopPlayer(private val onState: (PlaybackState) -> Unit) : AutoCloseabl
                 try {
                     if (latest.revision != current.revision) {
                         position = audiblePosition()
+                        val wasPlaying = playing
                         playing = false
                         line?.stop()
                         line?.flush()
                         val changedFile = latest.file != current.file || reader == null
+                        if (changedFile || !latest.playing || !wasPlaying || latest.outputDeviceId != current.outputDeviceId) {
+                            line?.close()
+                            line = null
+                            activeLine = null
+                        }
                         current = latest
                         if (changedFile) {
                             reader?.close()
@@ -168,17 +183,29 @@ class DesktopPlayer(private val onState: (PlaybackState) -> Unit) : AutoCloseabl
                         if (latest.playing && wav != null && wav.frameCount > 0) {
                             if (position >= wav.frameCount) position = 0.0
                             if (line == null) {
-                                val format = AudioFormat(wav.sampleRate.toFloat(), 16, 1, true, false)
-                                line = AudioSystem.getSourceDataLine(format)
+                                line = openOutput(latest.outputDeviceId, wav.sampleRate)
                                 activeLine = line
-                                line!!.open(format, (wav.sampleRate / 10).coerceAtLeast(1024) * 2)
                             }
                             val isCurrent = synchronized(lock) { !closed && request.revision == current.revision }
-                            if (!isCurrent) continue
+                            if (!isCurrent) {
+                                line.close()
+                                line = null
+                                activeLine = null
+                                continue
+                            }
+                            val output = checkNotNull(line)
+                            val format = output.format
+                            check(format.encoding == AudioFormat.Encoding.PCM_SIGNED && format.sampleSizeInBits == 16 &&
+                                !format.isBigEndian && format.channels in 1..2 && format.sampleRate.isFinite() && format.sampleRate > 0) {
+                                "The playback device did not provide a supported PCM format"
+                            }
+                            sourceFramesPerOutputFrame = wav.sampleRate.toDouble() / format.sampleRate * current.speed
                             epochSample = position
-                            epochFrame = line!!.longFramePosition
+                            epochFrame = output.longFramePosition
+                            lastOutputFrame = epochFrame
+                            lastOutputProgress = System.nanoTime()
                             queuedFrames = 0
-                            line!!.start()
+                            output.start()
                             playing = true
                         }
                         completeUnload()
@@ -188,18 +215,33 @@ class DesktopPlayer(private val onState: (PlaybackState) -> Unit) : AutoCloseabl
                     val wav = reader
                     val output = line
                     if (playing && wav != null && output != null) {
-                        val count = minOf(bytes.size / 2, output.available() / 2)
+                        check(output.isOpen && output.isRunning) { "The playback device stopped or disconnected. Reconnect it or choose another output." }
+                        val playedFrames = output.longFramePosition
+                        if (playedFrames > lastOutputFrame) {
+                            lastOutputFrame = playedFrames
+                            lastOutputProgress = System.nanoTime()
+                        }
+                        check(System.nanoTime() - lastOutputProgress < TimeUnit.MILLISECONDS.toNanos(outputStallTimeoutMs)) {
+                            "The playback device stopped accepting audio. Reconnect it or choose another output."
+                        }
+                        val frameSize = output.format.channels * 2
+                        val count = minOf(bytes.size / frameSize, output.available() / frameSize)
                         if (position < wav.frameCount && count > 0) {
-                            val rendered = wav.render(position, current.speed.toDouble(), bytes, count)
+                            val rendered = wav.render(position, sourceFramesPerOutputFrame, bytes, count, output.format.channels)
                             // available() limits writes to the small currently free output buffer.
-                            val written = output.write(bytes, 0, rendered.frames * 2) / 2
-                            position = (position + written * current.speed.toDouble()).coerceAtMost(wav.frameCount.toDouble())
+                            val writtenBytes = output.write(bytes, 0, rendered.frames * frameSize)
+                            check(writtenBytes in 0..rendered.frames * frameSize && writtenBytes % frameSize == 0) { "Playback device returned an incomplete audio frame" }
+                            val written = writtenBytes / frameSize
+                            position = (position + written * sourceFramesPerOutputFrame).coerceAtMost(wav.frameCount.toDouble())
                             queuedFrames += written
                         }
                         if (position >= wav.frameCount && output.longFramePosition - epochFrame >= queuedFrames) {
                             playing = false
                             position = wav.frameCount.toDouble()
                             output.stop()
+                            output.close()
+                            line = null
+                            activeLine = null
                             synchronized(lock) {
                                 if (request.revision == current.revision) request = request.copy(playing = false)
                             }
@@ -210,6 +252,10 @@ class DesktopPlayer(private val onState: (PlaybackState) -> Unit) : AutoCloseabl
                         }
                     }
                 } catch (failure: Exception) {
+                    val disconnected = playing && line?.let { output ->
+                        runCatching { !output.isOpen || !output.isRunning }.getOrDefault(false)
+                    } == true
+                    position = audiblePosition()
                     playing = false
                     runCatching { line?.close() }
                     line = null
@@ -221,7 +267,8 @@ class DesktopPlayer(private val onState: (PlaybackState) -> Unit) : AutoCloseabl
                             pendingUnload = null
                         }
                     }
-                    publish(failure.message ?: "Audio playback failed")
+                    publish(if (disconnected) "The playback device stopped or disconnected. Reconnect it or choose another output."
+                        else failure.message ?: "Audio playback failed")
                 }
                 synchronized(lock) {
                     if (!closed && request.revision == current.revision) lock.wait(if (playing) 10L else 1000L)
@@ -305,9 +352,10 @@ internal class PcmWavReader(file: File) : AutoCloseable {
 
     data class Rendered(val frames: Int, val nextPosition: Double)
 
-    fun render(position: Double, speed: Double, output: ByteArray, maxFrames: Int = output.size / 2): Rendered {
-        require(position.isFinite() && position >= 0 && speed.isFinite() && speed in 0.5..2.0)
-        require(maxFrames in 0..output.size / 2)
+    /** speed is the source-frame step, including any output sample-rate conversion. */
+    fun render(position: Double, speed: Double, output: ByteArray, maxFrames: Int = output.size / 2, channels: Int = 1): Rendered {
+        require(position.isFinite() && position >= 0 && speed.isFinite() && speed > 0)
+        require(channels in 1..2 && maxFrames in 0..output.size / (channels * 2))
         var cursor = position
         var frames = 0
         while (frames < maxFrames && cursor < frameCount) {
@@ -315,8 +363,11 @@ internal class PcmWavReader(file: File) : AutoCloseable {
             val a = sample(index)
             val b = sample((index + 1).coerceAtMost(frameCount - 1))
             val value = (a + (b - a) * (cursor - index)).roundToInt().coerceIn(-32768, 32767)
-            output[frames * 2] = value.toByte()
-            output[frames * 2 + 1] = (value shr 8).toByte()
+            repeat(channels) { channel ->
+                val offset = (frames * channels + channel) * 2
+                output[offset] = value.toByte()
+                output[offset + 1] = (value shr 8).toByte()
+            }
             frames++
             cursor += speed
         }

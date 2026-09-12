@@ -213,7 +213,7 @@ private fun RecordPage(state: AppState, actions: DesktopActions, onSettings: () 
                     }
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(14.dp), verticalAlignment = Alignment.CenterVertically) {
                         Button(onClick = if (capture.active) actions::stopRecording else actions::startRecording,
-                            enabled = capture.phase != CapturePhase.SAVING && (capture.active || (ready && !busyWithSpeakers)),
+                            enabled = capture.phase != CapturePhase.SAVING && (capture.active || (ready && !busyWithSpeakers && !state.audioCheck.active)),
                             colors = ButtonDefaults.buttonColors(containerColor = if (capture.active) Color(0xFFFFDFCE) else Accent, contentColor = Ink,
                                 disabledContainerColor = Color.White.copy(alpha = 0.12f), disabledContentColor = Mint.copy(alpha = 0.7f)),
                             shape = RoundedCornerShape(15.dp), contentPadding = PaddingValues(horizontal = 22.dp, vertical = 16.dp)) {
@@ -226,9 +226,26 @@ private fun RecordPage(state: AppState, actions: DesktopActions, onSettings: () 
                             Text("${SpeechLanguage.fromCode(state.settings.languageCode).label} · On this computer", color = Mint, style = MaterialTheme.typography.bodySmall)
                         }
                     }
-                    if (capture.phase == CapturePhase.PREPARING || capture.phase == CapturePhase.SAVING) LinearProgressIndicator(Modifier.fillMaxWidth(), color = Accent, trackColor = Teal)
+                    val transcriptLag = (capture.durationMs - capture.transcribedMs).coerceAtLeast(0)
+                    if (capture.phase == CapturePhase.PREPARING) LinearProgressIndicator(Modifier.fillMaxWidth(), color = Accent, trackColor = Teal)
+                    if (capture.phase == CapturePhase.SAVING) {
+                        if (capture.durationMs > 0 && transcriptLag > 0) {
+                            LinearProgressIndicator(progress = (capture.transcribedMs.toFloat() / capture.durationMs).coerceIn(0f, 1f),
+                                modifier = Modifier.fillMaxWidth(), color = Accent, trackColor = Teal)
+                            Text("Finishing transcript · ${durationLabel(capture.transcribedMs)} of ${durationLabel(capture.durationMs)} processed",
+                                color = Mint, style = MaterialTheme.typography.bodySmall, modifier = Modifier.testTag("transcription-progress"))
+                        } else {
+                            LinearProgressIndicator(Modifier.fillMaxWidth(), color = Accent, trackColor = Teal)
+                            Text("Finalizing your transcript and word timings…", color = Mint, style = MaterialTheme.typography.bodySmall)
+                        }
+                    } else if (capture.phase == CapturePhase.RECORDING && transcriptLag > 2_000) {
+                        Text("Recording continues · transcript is ${durationLabel(transcriptLag)} behind",
+                            color = Accent, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.testTag("transcription-progress"))
+                        Text("Audio keeps being saved. Transcription will catch up after you stop recording.", color = Mint, style = MaterialTheme.typography.bodySmall)
+                    }
                     if (!ready && !capture.active) TextButton(onClick = onSettings, colors = ButtonDefaults.textButtonColors(contentColor = Accent)) { Text("Choose or download a speech model in Settings →") }
                     if (busyWithSpeakers && !capture.active) Text("Finish or cancel speaker processing before starting another recording.", color = Mint, style = MaterialTheme.typography.bodySmall)
+                    if (state.audioCheck.active) Text("Finish the audio test in Settings before recording.", color = Mint, style = MaterialTheme.typography.bodySmall)
                 }
             }
         }
@@ -300,12 +317,51 @@ private fun LevelDisplay(level: Float, active: Boolean, modifier: Modifier) {
 
 @Composable
 private fun MicrophonePicker(state: AppState, actions: DesktopActions) {
-    val choices = listOf("" to "System default microphone") + state.microphones.filter { it.id.isNotEmpty() }.map { it.id to it.name }
+    val choices = deviceChoices("System default microphone", state.settings.microphoneId, state.microphones)
     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
         Icon(Icons.Default.Mic, null, tint = Muted, modifier = Modifier.size(20.dp))
-        ChoicePicker("Microphone", state.settings.microphoneId, choices, enabled = !state.capture.active,
+        ChoicePicker("Microphone", state.settings.microphoneId, choices, enabled = !state.capture.active && !state.audioCheck.active,
             modifier = Modifier.weight(1f), onSelect = { actions.updateSettings(state.settings.copy(microphoneId = it)) })
-        IconButton(onClick = actions::refreshMicrophones, enabled = !state.capture.active) { Icon(Icons.Default.Refresh, "Refresh microphones") }
+        IconButton(onClick = actions::refreshMicrophones, enabled = !state.capture.active && !state.audioCheck.active) { Icon(Icons.Default.Refresh, "Refresh audio devices") }
+    }
+}
+
+private fun deviceChoices(default: String, selected: String, devices: List<Microphone>): List<Pair<String, String>> =
+    listOf("" to default) + devices.filter { it.id.isNotEmpty() }.map { it.id to it.name } +
+        if (selected.isNotBlank() && devices.none { it.id == selected }) listOf(selected to "Unavailable — choose another device") else emptyList()
+
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun AudioSettings(state: AppState, actions: DesktopActions) {
+    val checking = state.audioCheck.active
+    val editable = !state.capture.active && !checking
+    CardSection {
+        SectionHeading(Icons.Default.Mic, "Microphone & speakers")
+        MicrophonePicker(state, actions)
+        ChoicePicker("Speakers / headphones", state.settings.outputDeviceId,
+            deviceChoices("System default speakers", state.settings.outputDeviceId, state.outputDevices),
+            enabled = editable && !state.playback.playing,
+            onSelect = { actions.updateSettings(state.settings.copy(outputDeviceId = it)) })
+        Text("Test your devices before the meeting. Microphone tests last up to 10 seconds; test audio is not saved or transcribed.", color = Muted, style = MaterialTheme.typography.bodySmall)
+        FlowRow(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            OutlinedButton(onClick = actions::testMicrophone, enabled = editable && !state.playback.playing,
+                modifier = Modifier.testTag("test-microphone")) { Text("Test microphone") }
+            OutlinedButton(onClick = actions::testSpeakers, enabled = editable && !state.playback.playing,
+                modifier = Modifier.testTag("test-speakers")) { Text("Test speakers") }
+            if (checking) TextButton(onClick = actions::stopAudioTest) { Text("Stop test") }
+        }
+        if (checking && state.audioCheck.kind == "microphone") {
+            LinearProgressIndicator(progress = state.audioCheck.level.coerceIn(0f, 1f), modifier = Modifier.fillMaxWidth(), color = Teal, trackColor = Wash)
+        }
+        if (state.audioCheck.message.isNotBlank()) Text(state.audioCheck.message, color = Teal, style = MaterialTheme.typography.bodySmall)
+        if (state.microphoneAccess.supported) {
+            Text(state.microphoneAccess.message, color = Muted, style = MaterialTheme.typography.bodySmall)
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                TextButton(onClick = actions::openMicrophoneSettings) { Text("Windows microphone settings") }
+                TextButton(onClick = actions::openSoundSettings) { Text("Windows Sound settings") }
+            }
+        }
+        Text("Only microphone audio is recorded. The speakers choice controls meeting playback; it does not capture another app’s sound.", color = Muted, style = MaterialTheme.typography.bodySmall)
     }
 }
 
@@ -559,15 +615,15 @@ private fun PlayerBar(position: Long, duration: Long, playing: Boolean, speed: F
 @Composable
 private fun SettingsPage(state: AppState, actions: DesktopActions, onRemove: (SpeechModel) -> Unit, onDeleteKey: () -> Unit) {
     val settings = state.settings
-    val busy = state.capture.active || state.speakerJob.active || state.speakerJob.installing
-    val canEditAi = !state.capture.active && !state.summaryBusy && !state.connectionBusy
+    val busy = state.capture.active || state.speakerJob.active || state.speakerJob.installing || state.audioCheck.active
+    val canEditAi = !state.capture.active && !state.summaryBusy && !state.connectionBusy && !state.audioCheck.active
     var key by remember { mutableStateOf("") }
     var summaryModel by remember(settings.providerId, settings.summaryModel) { mutableStateOf(settings.summaryModel) }
     val provider = LlmProvider.entries.firstOrNull { it.name == settings.providerId } ?: LlmProvider.OPENAI
     val selectedModel = SpeechModel.fromId(settings.modelId) ?: SpeechModel.NEMOTRON_ENGLISH
     LazyColumn(Modifier.fillMaxSize().testTag("settings-page"), contentPadding = PaddingValues(32.dp), verticalArrangement = Arrangement.spacedBy(22.dp)) {
         item { PageTitle("Make it work your way", "A thoughtful setup", "Choose local speech models, manage your microphone, and connect optional AI summaries.") }
-        item { CardSection { SectionHeading(Icons.Default.Mic, "Audio input"); MicrophonePicker(state, actions); Text("Choose your laptop, USB, or Bluetooth microphone. Only microphone audio is recorded; this does not capture another app’s sound directly.", color = Muted, style = MaterialTheme.typography.bodySmall) } }
+        item { AudioSettings(state, actions) }
         item {
             CardSection {
                 SectionHeading(Icons.Default.GraphicEq, "Local transcription")

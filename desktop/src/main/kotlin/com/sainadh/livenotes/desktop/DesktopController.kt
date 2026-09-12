@@ -5,7 +5,9 @@ import com.sainadh.livenotes.ai.LlmConnectionRequest
 import com.sainadh.livenotes.ai.LlmProvider
 import com.sainadh.livenotes.ai.LlmSummaryRequest
 import com.sainadh.livenotes.desktop.audio.AudioDevices
+import com.sainadh.livenotes.desktop.audio.AudioDiagnostics
 import com.sainadh.livenotes.desktop.audio.DesktopPlayer
+import com.sainadh.livenotes.desktop.audio.WindowsAudioSettings
 import com.sainadh.livenotes.desktop.data.AppPaths
 import com.sainadh.livenotes.desktop.data.ModelStore
 import com.sainadh.livenotes.desktop.data.ModelSources
@@ -19,6 +21,7 @@ import com.sainadh.livenotes.desktop.speakers.DiarizationClient
 import com.sainadh.livenotes.desktop.speakers.SpeakerWord
 import com.sainadh.livenotes.desktop.speakers.assignSpeakerTurns
 import com.sainadh.livenotes.desktop.stt.DesktopRecorder
+import com.sainadh.livenotes.desktop.stt.DiskPcmBacklog
 import com.sainadh.livenotes.stt.LiveTranscriptBuffer
 import com.sainadh.livenotes.stt.SpeechLanguage
 import com.sainadh.livenotes.stt.SpeechModel
@@ -80,6 +83,8 @@ class DesktopController(
     private var loadJob: Job? = null
     private var summaryJob: Job? = null
     private var speakerJob: Job? = null
+    private var audioCheckJob: Job? = null
+    private val audioDiagnostics = AudioDiagnostics()
     private val downloads = mutableMapOf<String, Job>()
     private val removingModels = mutableSetOf<String>()
     private var closed = false
@@ -104,11 +109,15 @@ class DesktopController(
     }
     private val recorder = DesktopRecorder(
         onTranscriptUpdate = { update -> currentId?.let { events.trySendBlocking(RecordingEvent.Text(it, update)).getOrThrow() } },
-        onLevel = { duration, level -> mutableState.update { it.copy(capture = it.capture.copy(durationMs = duration, level = level)) } },
+        onLevel = { duration, level -> mutableState.update { it.copy(capture = it.capture.copy(durationMs = maxOf(it.capture.durationMs, duration), level = level)) } },
         onFinished = { file, duration, _, error -> currentId?.let { events.trySendBlocking(RecordingEvent.Finished(it, file, duration, error, finishSignal)).getOrThrow() } },
         onPhase = { phase ->
             val mapped = when (phase) { "preparing" -> CapturePhase.PREPARING; "recording" -> CapturePhase.RECORDING; "saving" -> CapturePhase.SAVING; else -> null }
             if (mapped != null) mutableState.update { it.copy(capture = it.capture.copy(phase = mapped)) }
+        },
+        onProgress = { capturedMs, transcribedMs ->
+            mutableState.update { it.copy(capture = it.capture.copy(durationMs = maxOf(it.capture.durationMs, capturedMs),
+                transcribedMs = maxOf(it.capture.transcribedMs, transcribedMs))) }
         })
 
     init {
@@ -167,7 +176,14 @@ class DesktopController(
             val validated = settings.copy(modelId = model.id, languageCode = language.code,
                 providerId = runCatching { LlmProvider.valueOf(settings.providerId).name }.getOrDefault("OPENAI"))
             mutableState.update { it.copy(settings = validated) }
+            player.setOutputDevice(validated.outputDeviceId.ifBlank { null })
             val recovered = withContext(Dispatchers.IO) { store.recoverInterrupted() }
+            // Main owns the application instance lock before constructing this controller.
+            withContext(Dispatchers.IO) {
+                runCatching { DiskPcmBacklog.cleanupAbandoned(paths.recordings) }.onFailure {
+                    showNotice("Some temporary transcription files could not be removed. Your recordings are preserved; restart the app to retry cleanup.")
+                }
+            }
             refreshLibrary()
             refreshDownloads()
             refreshKey()
@@ -227,6 +243,7 @@ class DesktopController(
     }
     override fun startRecording() {
         if (mutableState.value.capture.active || closed || !ready) return
+        if (audioCheckJob?.isCompleted == false) { showError("Finish the audio test before recording."); return }
         if (mutableState.value.speakerJob.active) { showError("Wait for speaker analysis to finish, or cancel it before recording."); return }
         if (downloads[mutableState.value.settings.modelId]?.isCompleted == false || mutableState.value.settings.modelId in removingModels) {
             showError("Wait for this model to finish downloading, importing, or removing before recording."); return
@@ -263,9 +280,39 @@ class DesktopController(
         recorder.stop()
     }
     override fun refreshMicrophones() { launchOperation {
-        val inputs = withContext(Dispatchers.IO) { AudioDevices.inputs().map { Microphone(it.id, it.name) } }
-        mutableState.update { it.copy(microphones = inputs) }
+        val devices = withContext(Dispatchers.IO) {
+            Triple(AudioDevices.inputs().map { Microphone(it.id, it.name) },
+                AudioDevices.outputs().map { Microphone(it.id, it.name) }, WindowsAudioSettings.microphoneAccess())
+        }
+        mutableState.update { it.copy(microphones = devices.first, outputDevices = devices.second, microphoneAccess = devices.third) }
     } }
+    override fun testMicrophone() = startAudioTest("microphone")
+    override fun testSpeakers() = startAudioTest("speakers")
+    private fun startAudioTest(kind: String) {
+        if (closed || !ready || audioCheckJob?.isCompleted == false) return
+        if (mutableState.value.capture.active || mutableState.value.playback.playing || desiredPlayback.get()) {
+            showError("Stop recording and pause playback before testing an audio device."); return
+        }
+        val settings = mutableState.value.settings
+        mutableState.update { it.copy(audioCheck = AudioCheckView(true, kind, message = if (kind == "microphone")
+            "Speak into the selected microphone. This check lasts up to 10 seconds." else "Playing a short test tone…")) }
+        audioCheckJob = launchOperation {
+            try {
+                val message = if (kind == "microphone") audioDiagnostics.microphone(settings.microphoneId.ifBlank { null }) { level ->
+                    mutableState.update { it.copy(audioCheck = it.audioCheck.copy(level = level)) }
+                } else audioDiagnostics.speakers(settings.outputDeviceId.ifBlank { null })
+                mutableState.update { it.copy(audioCheck = AudioCheckView(message = message)) }
+            } catch (cancelled: CancellationException) {
+                mutableState.update { it.copy(audioCheck = AudioCheckView(message = "Audio test stopped.")) }
+                throw cancelled
+            } catch (failure: Throwable) {
+                mutableState.update { it.copy(audioCheck = AudioCheckView(message = failure.message ?: "The audio test failed.")) }
+            }
+        }
+    }
+    override fun stopAudioTest() { audioCheckJob?.cancel(); audioDiagnostics.cancel() }
+    override fun openMicrophoneSettings() { launchOperation { withContext(Dispatchers.IO) { WindowsAudioSettings.openMicrophone() } } }
+    override fun openSoundSettings() { launchOperation { withContext(Dispatchers.IO) { WindowsAudioSettings.openSound() } } }
     override fun selectRecording(id: String) {
         loadJob?.cancel()
         if (playbackId != id) pausePlayback()
@@ -297,6 +344,7 @@ class DesktopController(
     }
     private fun preparePlayback(): Boolean {
         if (mutableState.value.capture.active) { showError("Stop recording before playing audio."); return false }
+        if (audioCheckJob?.isCompleted == false) { showError("Finish the audio test before playing a recording."); return false }
         val document = mutableState.value.selected ?: return false
         if (document.entry.id in deletingIds) return false
         if (!document.entry.hasAudio) { showError("This meeting has no saved audio."); return false }
@@ -374,10 +422,15 @@ class DesktopController(
     override fun closeFullTranscript() { ++fullTextRequest; mutableState.update { it.copy(liveFullText = null) } }
     override fun updateSettings(settings: AppSettings) {
         if (mutableState.value.capture.active) { showError("Settings can be changed after recording finishes."); return }
+        if (audioCheckJob?.isCompleted == false) { showError("Finish the audio test before changing settings."); return }
+        if (settings.outputDeviceId != mutableState.value.settings.outputDeviceId && desiredPlayback.get()) {
+            showError("Pause playback before choosing a different output device."); return
+        }
         val model = SpeechModel.fromId(settings.modelId) ?: return
         if (model.languages.none { it.code == settings.languageCode } || LlmProvider.entries.none { it.name == settings.providerId }) return
         // Publish synchronously so a following UI edit starts from the latest values.
         mutableState.update { it.copy(settings = settings) }
+        player.setOutputDevice(settings.outputDeviceId.ifBlank { null })
         launchOperation {
             settingsMutex.withLock { withContext(Dispatchers.IO) { settingsStore.save(mutableState.value.settings) } }
             refreshKey()
@@ -620,6 +673,8 @@ class DesktopController(
     suspend fun shutdown() {
         if (closed) return
         closed = true
+        stopAudioTest()
+        audioCheckJob?.join()
         stopRecording()
         preparation?.join()
         finishSignal.await()

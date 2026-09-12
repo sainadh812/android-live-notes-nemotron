@@ -14,12 +14,10 @@ import java.io.IOException
 import java.nio.file.Files
 import java.nio.file.StandardCopyOption
 import java.security.MessageDigest
-import java.util.concurrent.TimeUnit
 
 data class ModelDownloadSpec(val name: String, val url: String, val bytes: Long, val sha256: String)
 
-class ModelStore(private val directory: File, private val client: OkHttpClient = OkHttpClient.Builder()
-    .connectTimeout(20, TimeUnit.SECONDS).readTimeout(30, TimeUnit.SECONDS).build()) {
+class ModelStore(private val directory: File, private val client: OkHttpClient = DesktopHttpClient.create()) {
     private val calls = java.util.concurrent.ConcurrentHashMap<String, okhttp3.Call>()
     fun cancel(model: SpeechModel) { calls[model.fileName]?.cancel() }
     fun file(model: SpeechModel) = File(directory, model.fileName)
@@ -122,7 +120,7 @@ class ModelStore(private val directory: File, private val client: OkHttpClient =
                         }
                         response.body?.contentLength()?.takeIf { it >= 0 }?.let { check(it == end.toLong() - offset + 1) }
                     } else if (response.code == 200) offset = 0L
-                    else throw IOException("Model download failed (HTTP ${response.code}). Retry when connected.")
+                    else throw modelHttpFailure(response.code)
                     val body = response.body ?: throw IOException("Model download is empty.")
                     FileOutputStream(partial, offset > 0).use { output ->
                         body.byteStream().use { input ->
@@ -140,6 +138,9 @@ class ModelStore(private val directory: File, private val client: OkHttpClient =
                         output.fd.sync()
                     }
                 }
+            } catch (failure: IOException) {
+                currentCoroutineContext().ensureActive()
+                throw modelNetworkFailure(failure)
             } finally { cancellation?.dispose(); calls.remove(spec.name, call) }
         }
         currentCoroutineContext().ensureActive()

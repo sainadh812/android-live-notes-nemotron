@@ -1,7 +1,7 @@
 name: Windows desktop checks and installer
 on:
   push:
-    branches: [main, feature/windows-desktop, feature/windows-github-models]
+    branches: [main, feature/windows-desktop, feature/windows-github-models, feature/windows-handy-reliability]
     paths: ['desktop/**', '.github/workflows/windows-desktop.yml', 'app/src/main/java/**', 'app/src/main/cpp/nemotron_jni.cpp']
   workflow_dispatch:
 
@@ -51,7 +51,7 @@ jobs:
       - name: Cancel real speaker analysis without losing audio
         shell: pwsh
         run: ./gradlew.bat -p desktop speakerCancellationCheck --no-daemon --console=plain
-      - name: Download from GitHub, import model, and verify real speech
+      - name: Verify GitHub model import, real speech, and recording backlog
         if: ${{ !cancelled() && steps.jvm.outcome == 'success' && steps.native.outcome == 'success' }}
         shell: pwsh
         run: |
@@ -92,6 +92,7 @@ jobs:
             desktop/build/speaker-evidence/cancellation/worker-cancellation.json
             desktop/build/speech-evidence/result.log
             desktop/build/speech-evidence/model-transfer.json
+            desktop/build/speech-evidence/recorder-backlog.json
             desktop/build/install-evidence/
           retention-days: 14
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02

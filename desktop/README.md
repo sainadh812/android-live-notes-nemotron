@@ -7,7 +7,7 @@ recording libraries are separate.
 
 ## Install and record
 
-Download [Windows 1.0.1 Preview](https://github.com/sainadh812/android-live-notes-nemotron/releases/tag/windows-v1.0.1).
+Download [Windows 1.0.2 Preview](https://github.com/sainadh812/android-live-notes-nemotron/releases/tag/windows-v1.0.2).
 Use the Windows x64 EXE installer, or extract the portable ZIP and run
 `LiveMeetingNotes.exe` inside its folder. The package includes its Java runtime,
 native speech engine, and speaker worker; Java and Python installations are not
@@ -20,12 +20,19 @@ required. Keep the files in a portable distribution together.
    choices as Android; its Q8 variant is approximately 752 MB. Model files are
    separate from the installer. Browser downloads and manual imports are also
    supported, as described below.
-2. Choose the input microphone and supported language. Windows exposes the
+2. Choose the input microphone and supported language. In **Settings → Microphone & speakers**,
+   use **Test microphone** to check input without loading a model or saving audio.
+   Select your playback speakers/headphones and use **Test speakers** to hear a short tone.
+   Windows exposes the
    available built-in, USB, and Bluetooth input devices. This version captures
    the selected microphone input; it does not capture Teams/Zoom system output.
 3. Start recording. The timer and microphone level reflect captured samples.
-   Incoming words appear in the live transcript. **Stop** drains accepted speech
-   input and saves the WAV and transcript before the meeting enters the library.
+   Incoming words appear as the selected model processes the audio. If the model
+   runs slower than the microphone, recording continues and the app shows how
+   far transcription is behind. **Stop** ends microphone capture, then processes
+   the pending audio and saves the WAV and transcript before the meeting enters
+   the library. Keep the app open while it catches up; a large backlog can take
+   longer to finish.
 4. Open the meeting in **Library**. Play, pause, seek, skip ten seconds, or tap a
    timestamp/word to play from there. Follow mode scrolls with the current word.
    Playback speeds range from 0.5× to 2×; changing speed also changes pitch.
@@ -35,6 +42,29 @@ required. Keep the files in a portable distribution together.
 This version uses four CPU inference threads. Intel GPU acceleration has
 not been enabled or measured in this build. CPU speed varies by i7 generation,
 power settings, model, and other applications running during the meeting.
+The app keeps your selected model, including **Nemotron 3.5 · Full**. For lower
+compute requirements, choose **Nemotron English** for English meetings or
+**Nemotron 3.5 · Compact** for its supported multilingual meetings before the
+next recording. These choices can reduce transcription lag; choose **Use model**
+before starting the next meeting to apply your selection.
+
+Windows 1.0.2 reads the system proxy configuration and uses Windows-installed
+trusted certificate authorities alongside the bundled runtime's public roots
+for speech-model downloads. HTTPS certificate and hostname validation remain
+enabled. An office proxy that requires authentication may still need a browser
+download followed by **Import .gguf**; the app does not collect proxy passwords.
+
+The audio settings show advisory Windows microphone-permission status and links
+to **Windows microphone settings** and **Windows Sound settings**. Permission
+status does not guarantee that a device or driver can open; use the device tests.
+Missing selected devices remain visible so you can reconnect them or select a
+different device. Playback supports common mono/stereo device rates while keeping
+the transcript clock in the recording's time. Pausing releases the output device;
+playing again reopens it, including the current Windows default when selected.
+Capture reports disconnected or stalled devices and preserves captured audio.
+
+See [the Handy comparison](HANDY-COMPARISON.md) for what was adapted and what
+still differs, including the native audio backend and physical-device limitations.
 
 ## Speech model downloads and imports
 
@@ -126,11 +156,21 @@ decoder timing files are stored under `recordings`. Speech models live under
 `models`; speaker models live under `speaker-models`.
 
 Audio is 16 kHz mono 16-bit PCM (about 1.9 MB per minute). The recorder writes it
-progressively and checkpoints the WAV header every two seconds. A bounded
-ten-second queue separates capture from inference. If decoding cannot keep up,
-capture stops with an error while already recorded audio is preserved. Missing
-or uncertain transcript content is not reported as a complete recording.
-Interrupted recording files are recovered on the next launch when valid.
+progressively and checkpoints the WAV header every two seconds. Capture and
+inference run separately, with fixed-size audio blocks in memory. Pending audio
+stays in a temporary PCM file, so a slow model can fall behind without filling
+the old ten-second queue and stopping capture. The live transcript may lag behind
+the recording timer; after Stop, the app consumes the remaining audio in order before
+finalizing the transcript. Closing the app during this work waits for saving.
+
+The temporary PCM copy uses about 115 MB per hour of recorded audio in addition
+to the WAV while recording or catching up. It is removed after both audio capture
+and transcription have finished. Keep enough free disk space for both files.
+A storage, device, or speech-engine error is still reported; the app preserves successfully
+written audio where possible and does not label an incomplete transcript as
+complete. Interrupted recording files are recovered on the next launch when
+valid. The change removes the short queue limit; it does not guarantee that the
+Full model transcribes in real time on every laptop.
 
 The live preview is capped at 4,000 characters and 120 segments. The complete
 transcript remains saved and available through Copy, Save, and View full

@@ -1,5 +1,6 @@
 package com.sainadh.livenotes.desktop.stt
 
+import com.sainadh.livenotes.desktop.data.DesktopHttpClient
 import java.io.File
 import java.util.concurrent.TimeUnit
 
@@ -12,6 +13,8 @@ internal object InstalledNativeChecks {
         val native = File(resources, "native")
         val report = File(evidence, "installed-native-checks.txt")
         report.writeText("resources_dir=${resources.canonicalPath}\n")
+        DesktopHttpClient.verifyWindowsSupport()
+        report.appendText("desktop_https=ok\n")
         val notices = File(resources, "model-notices")
         check(File(notices, "Notice.txt").readText().contains("Licensed by NVIDIA Corporation under the NVIDIA Open Model License")) {
             "The packaged speech model notice is missing"

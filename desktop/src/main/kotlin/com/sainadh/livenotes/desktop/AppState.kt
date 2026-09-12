@@ -13,7 +13,8 @@ data class AppSettings(
     val providerId: String = "OPENAI",
     val summaryModel: String = "",
     val autoSummaries: Boolean = false,
-    val autoSpeakers: Boolean = true
+    val autoSpeakers: Boolean = true,
+    val outputDeviceId: String = ""
 )
 
 enum class CapturePhase { IDLE, PREPARING, RECORDING, SAVING }
@@ -25,10 +26,13 @@ data class CaptureView(
     val level: Float = 0f,
     val preview: String = "",
     val segments: List<TranscriptUpdate> = emptyList(),
-    val hasEarlierText: Boolean = false
+    val hasEarlierText: Boolean = false,
+    val transcribedMs: Long = 0
 ) { val active: Boolean get() = phase != CapturePhase.IDLE }
 
 data class Microphone(val id: String, val name: String)
+data class AudioCheckView(val active: Boolean = false, val kind: String = "", val level: Float = 0f, val message: String = "")
+data class MicrophoneAccessView(val supported: Boolean = false, val status: String = "unknown", val message: String = "")
 data class RecordingEntry(
     val id: String,
     val title: String,
@@ -85,6 +89,9 @@ data class AppState(
     val initializing: Boolean = true,
     val settings: AppSettings = AppSettings(),
     val microphones: List<Microphone> = emptyList(),
+    val outputDevices: List<Microphone> = emptyList(),
+    val audioCheck: AudioCheckView = AudioCheckView(),
+    val microphoneAccess: MicrophoneAccessView = MicrophoneAccessView(),
     val capture: CaptureView = CaptureView(),
     val recordings: List<RecordingEntry> = emptyList(),
     val selected: RecordingDocument? = null,
@@ -105,6 +112,11 @@ interface DesktopActions {
     fun startRecording()
     fun stopRecording()
     fun refreshMicrophones()
+    fun testMicrophone()
+    fun testSpeakers()
+    fun stopAudioTest()
+    fun openMicrophoneSettings()
+    fun openSoundSettings()
     fun selectRecording(id: String)
     fun closeRecording()
     fun renameRecording(id: String, title: String)

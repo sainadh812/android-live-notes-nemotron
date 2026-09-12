@@ -28,7 +28,8 @@ class DesktopUiTest {
     @Test fun longCaptureKeepsFullTranscriptActionsAvailable() {
         val actions = TestActions()
         show(AppState(capture = CaptureView(CapturePhase.RECORDING, "live", 3_600_000, .42f,
-            "We agreed to share the revised design tomorrow. The next step is to review the timeline together.", hasEarlierText = true)), actions)
+            "We agreed to share the revised design tomorrow. The next step is to review the timeline together.", hasEarlierText = true,
+            transcribedMs = 3_600_000)), actions)
         compose.onNodeWithText("1:00:00").assertExists()
         compose.onNodeWithText("Stop & save").assertIsEnabled()
         screenshot("recording")
@@ -113,6 +114,56 @@ class DesktopUiTest {
         assertEquals(SpeechModel.MOONSHINE_TINY.id, actions.canceledModel)
     }
 
+    @Test fun audioSettingsOfferDeviceChecksAndWindowsPermissionGuidance() {
+        val actions = TestActions()
+        show(AppState(microphoneAccess = MicrophoneAccessView(true, "unknown", "Check desktop microphone access in Windows Settings."),
+            outputDevices = listOf(Microphone("headset", "USB headset"))), actions)
+        compose.onNodeWithTag("nav-settings").performClick()
+        compose.onNodeWithTag("settings-page").performScrollToNode(hasTestTag("test-microphone"))
+        compose.onNodeWithTag("test-microphone").performScrollTo().performClick()
+        compose.onNodeWithTag("test-speakers").performScrollTo().performClick()
+        assertEquals(1, actions.microphoneTests)
+        assertEquals(1, actions.speakerTests)
+        compose.onNodeWithText("System default speakers").performScrollTo().performClick()
+        compose.onNodeWithText("USB headset").performClick()
+        assertEquals("headset", actions.settings?.outputDeviceId)
+        compose.onNodeWithText("Windows microphone settings").performScrollTo().performClick()
+        compose.onNodeWithText("Windows Sound settings").performScrollTo().performClick()
+        assertEquals(1, actions.microphoneSettingsCalls)
+        assertEquals(1, actions.soundSettingsCalls)
+        screenshot("audio-settings")
+    }
+
+    @Test fun audioTestBlocksRecordingAndDeviceChangesUntilStopped() {
+        val actions = TestActions()
+        show(AppState(downloads = SpeechModel.entries.map { DownloadView(it.id, installed = true) },
+            audioCheck = AudioCheckView(true, "microphone", .4f, "Speak into the selected microphone.")), actions)
+        compose.onNodeWithText("Start recording").assertIsNotEnabled()
+        compose.onNodeWithTag("nav-settings").performClick()
+        compose.onNodeWithTag("settings-page").performScrollToNode(hasTestTag("test-microphone"))
+        compose.onNodeWithTag("test-microphone").assertIsNotEnabled()
+        compose.onNodeWithTag("test-speakers").assertIsNotEnabled()
+        compose.onNodeWithText("Stop test").performScrollTo().performClick()
+        assertEquals(1, actions.stopAudioCalls)
+    }
+
+    @Test fun slowTranscriptionShowsLagWithoutDisablingRecordingControls() {
+        val actions = TestActions()
+        show(AppState(capture = CaptureView(phase = CapturePhase.RECORDING, durationMs = 60_000,
+            transcribedMs = 20_000, preview = "The meeting is still being recorded.")), actions)
+        compose.onNodeWithTag("transcription-progress").assertTextEquals("Recording continues · transcript is 00:40 behind")
+        compose.onNodeWithText("Stop & save").assertIsEnabled()
+        screenshot("transcription-lag")
+    }
+
+    @Test fun stoppedRecordingShowsTranscriptCatchUpProgress() {
+        val actions = TestActions()
+        show(AppState(capture = CaptureView(phase = CapturePhase.SAVING, durationMs = 60_000,
+            transcribedMs = 30_000)), actions)
+        compose.onNodeWithTag("transcription-progress").assertTextEquals("Finishing transcript · 00:30 of 01:00 processed")
+        compose.onNodeWithText("Saving…").assertIsNotEnabled()
+    }
+
     private fun screenshot(name: String) {
         compose.waitForIdle()
         val image = compose.onRoot().captureToImage().toPixelMap()
@@ -153,9 +204,20 @@ class DesktopUiTest {
         var downloadedModel: String? = null
         var importedModel: String? = null
         var canceledModel: String? = null
+        var microphoneTests = 0
+        var speakerTests = 0
+        var stopAudioCalls = 0
+        var microphoneSettingsCalls = 0
+        var soundSettingsCalls = 0
+        var settings: AppSettings? = null
         override fun startRecording() = Unit
         override fun stopRecording() = Unit
         override fun refreshMicrophones() = Unit
+        override fun testMicrophone() { microphoneTests++ }
+        override fun testSpeakers() { speakerTests++ }
+        override fun stopAudioTest() { stopAudioCalls++ }
+        override fun openMicrophoneSettings() { microphoneSettingsCalls++ }
+        override fun openSoundSettings() { soundSettingsCalls++ }
         override fun selectRecording(id: String) = Unit
         override fun closeRecording() = Unit
         override fun renameRecording(id: String, title: String) = Unit
@@ -171,7 +233,7 @@ class DesktopUiTest {
         override fun exportSummary(recordingId: String) = Unit
         override fun openFullTranscript() { fullCalls++ }
         override fun closeFullTranscript() = Unit
-        override fun updateSettings(settings: AppSettings) = Unit
+        override fun updateSettings(settings: AppSettings) { this.settings = settings }
         override fun saveApiKey(key: String) { this.key = key }
         override fun deleteApiKey() = Unit
         override fun testConnection() = Unit

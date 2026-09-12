@@ -7,7 +7,7 @@ plugins {
 }
 
 group = "com.sainadh.livenotes"
-version = "1.0.1"
+version = "1.0.2"
 kotlin { jvmToolchain(17) }
 
 // Compile the same platform-independent source used by Android. Generated copies
@@ -54,7 +54,7 @@ dependencies {
     testImplementation(compose.desktop.uiTestJUnit4)
 }
 
-tasks.test { useJUnit(); systemProperty("java.awt.headless", "true") }
+tasks.test { useJUnit(); systemProperty("java.awt.headless", "true"); systemProperty("java.net.useSystemProxies", "true") }
 
 tasks.register<JavaExec>("speechSmoke") {
     dependsOn(tasks.classes)
@@ -83,20 +83,22 @@ tasks.register<JavaExec>("modelTransferCheck") {
     classpath = sourceSets.test.get().runtimeClasspath
     mainClass.set("com.sainadh.livenotes.desktop.data.ModelTransferCheck")
     systemProperty("livenotes.native.dir", project.file("resources/windows-x64/native").absolutePath)
+    systemProperty("java.net.useSystemProxies", "true")
     args(project.file("build/speech-evidence").absolutePath)
 }
 
 compose.desktop {
     application {
         mainClass = "com.sainadh.livenotes.desktop.MainKt"
-        jvmArgs += listOf("-Xmx2048m", "-Dfile.encoding=UTF-8")
+        jvmArgs += listOf("-Xmx2048m", "-Dfile.encoding=UTF-8", "-Djava.net.useSystemProxies=true")
         nativeDistributions {
             targetFormats(TargetFormat.Exe, TargetFormat.Msi)
             packageName = "LiveMeetingNotes"
-            packageVersion = "1.0.1"
+            packageVersion = "1.0.2"
             description = "Local meeting recording, transcription and speaker notes"
             vendor = "LiveMeetingNotes"
             modules("java.sql", "java.desktop", "java.net.http", "jdk.crypto.ec", "jdk.unsupported", "java.naming")
+            if (System.getProperty("os.name").startsWith("Windows")) modules("jdk.crypto.mscapi")
             appResourcesRootDir.set(project.layout.projectDirectory.dir("resources"))
             windows {
                 menuGroup = "LiveMeetingNotes"

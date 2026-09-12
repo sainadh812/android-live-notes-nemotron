@@ -8,11 +8,11 @@ import com.sainadh.livenotes.stt.NativeWordTimingFile
 import com.sainadh.livenotes.stt.TranscriptSampleClock
 import com.sainadh.livenotes.stt.TranscriptUpdate
 import java.io.File
-import java.util.concurrent.ArrayBlockingQueue
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicLong
 import kotlin.math.sqrt
 import javax.sound.sampled.TargetDataLine
 
@@ -21,15 +21,17 @@ class DesktopRecorder(
     private val onTranscriptUpdate: (TranscriptUpdate) -> Unit,
     private val onLevel: (durationMs: Long, level: Float) -> Unit,
     private val onFinished: (audioFile: File?, durationMs: Long, wordTiming: String?, error: String?) -> Unit,
-    private val onPhase: (String) -> Unit
+    private val onPhase: (String) -> Unit,
+    private val onProgress: (capturedMs: Long, transcribedMs: Long) -> Unit = { _, _ -> }
 ) : AutoCloseable {
     // Set only before start, by module-local tests. Production uses JNI/JavaSound.
     internal var speech: SpeechNativeApi = NativeSpeech
     internal var openMicrophone: (String?) -> TargetDataLine = AudioDevices::open
+    internal var inputStallTimeoutMs = 5_000L
     private class Capture {
         val stop = AtomicBoolean()
         val done = CountDownLatch(1)
-        val queue = ArrayBlockingQueue<FloatArray>(20) // 10 seconds at 16 kHz.
+        val transcribedSamples = AtomicLong()
         @Volatile var error: String? = null
         @Volatile var audio: File? = null
         @Volatile var durationMs = 0L
@@ -82,6 +84,7 @@ class DesktopRecorder(
     private fun record(capture: Capture, model: File, language: String, device: String?, output: File) {
         var handle = 0L
         var captureStarted = false
+        var backlog: DiskPcmBacklog? = null
         var failure: String? = null
         var timing: String? = null
         val segments = NativeTranscriptSegments()
@@ -94,15 +97,24 @@ class DesktopRecorder(
             if (capture.stop.get()) return
             handle = speech.nativeInit(model.canonicalPath, language, -1)
             check(handle != 0L) { "Could not initialize speech model" }
+            val pcmBacklog = DiskPcmBacklog(output.absoluteFile.parentFile).also { backlog = it }
             synchronized(lock) {
                 if (capture.stop.get() || closed) return
-                microphone.execute { capture(capture, device, output) }
+                microphone.execute { capture(capture, device, output, pcmBacklog) }
                 captureStarted = true
             }
-            while (capture.done.count != 0L || capture.queue.isNotEmpty()) {
-                val chunk = capture.queue.poll(20, TimeUnit.MILLISECONDS) ?: continue
+            while (true) {
+                val captureFinished = capture.done.count == 0L
+                val chunk = pcmBacklog.next(captureFinished)
+                if (chunk == null) {
+                    if (captureFinished) break
+                    Thread.sleep(20)
+                    continue
+                }
                 val delta = speech.nativeFeedPcm(handle, chunk)
                 clock.consume(chunk.size)
+                capture.transcribedSamples.addAndGet(chunk.size.toLong())
+                progress(capture)
                 delta?.let { segments.update(it).forEach { update -> onTranscriptUpdate(clock.stamp(update)) } }
                 check(!speech.nativeWasTruncated(handle)) {
                     "The speech model reached its output limit. Recorded audio was preserved; the transcript is incomplete."
@@ -121,9 +133,12 @@ class DesktopRecorder(
         } finally {
             requestStop(capture)
             if (captureStarted) capture.done.await()
+            failure = failure ?: capture.error
+            runCatching { backlog?.close() }.exceptionOrNull()?.let {
+                failure = failure ?: "Audio saved, but temporary transcription audio could not be removed: ${it.message}"
+            }
             if (!finalized && handle != 0L) runCatching { onTranscriptUpdate(clock.stamp(segments.interrupted())) }
                 .exceptionOrNull()?.let { failure = failure ?: "Could not deliver transcript: ${it.message}" }
-            failure = failure ?: capture.error
             // Native teardown is complete before the owner may change/delete a model.
             if (handle != 0L) runCatching { speech.nativeDestroy(handle) }.exceptionOrNull()?.let {
                 failure = failure ?: "Could not release speech model: ${it.message}"
@@ -138,7 +153,7 @@ class DesktopRecorder(
         }
     }
 
-    private fun capture(state: Capture, device: String?, output: File) {
+    private fun capture(state: Capture, device: String?, output: File, backlog: DiskPcmBacklog) {
         var wav: WavFileWriter? = null
         try {
             if (state.stop.get()) return
@@ -148,36 +163,40 @@ class DesktopRecorder(
                 wav = WavFileWriter(output, 16_000)
                 val converter = Pcm16MonoConverter(line.format.sampleRate.toInt(), line.format.channels)
                 val raw = ByteArray(line.format.frameSize * 4096)
-                val queued = FloatArray(8000)
-                var pending = 0
                 var savedSamples = 0L
                 var lastLevelSamples = 0L
                 var energy = 0.0
                 var energySamples = 0
-                fun enqueue(count: Int) {
-                    check(state.queue.offer(queued.copyOf(count))) {
-                        "Transcription could not keep up. Audio captured so far was saved, but the transcript is incomplete."
-                    }
-                }
+                var receivedSamples = false
+                val lastInput = AtomicLong(System.nanoTime())
                 fun readAvailable(): Int {
                     val available = (minOf(line.available(), raw.size) / line.format.frameSize) * line.format.frameSize
                     if (available == 0) return 0
                     val count = line.read(raw, 0, available)
                     check(count >= 0) { "Microphone stopped unexpectedly" }
+                    if (count == 0) return 0
                     val pcm = converter.convert(raw, count)
                     checkNotNull(wav).write(pcm, 0, pcm.size) // Storage always precedes inference.
+                    lastInput.set(System.nanoTime())
+                    if (!receivedSamples) {
+                        receivedSamples = true
+                        // A device opening successfully does not mean it is delivering audio.
+                        if (!state.stop.get()) emit { onPhase("recording") }
+                    }
                     savedSamples += pcm.size
                     state.durationMs = savedSamples * 1000 / 16_000
+                    try { backlog.append(pcm) } catch (error: java.io.IOException) {
+                        throw java.io.IOException("Audio saved, but temporary transcription audio could not be written: ${error.message}", error)
+                    }
                     for (sample in pcm) {
                         val value = sample / 32768f
                         energy += value * value
                         energySamples++
-                        queued[pending++] = value
-                        if (pending == queued.size) { enqueue(pending); pending = 0 }
                     }
                     if (savedSamples - lastLevelSamples >= 1600) {
                         val level = if (energySamples == 0) 0f else sqrt(energy / energySamples).toFloat().coerceIn(0f, 1f)
                         emit { onLevel(state.durationMs, level) }
+                        progress(state)
                         lastLevelSamples = savedSamples
                         energy = 0.0
                         energySamples = 0
@@ -185,19 +204,44 @@ class DesktopRecorder(
                     return count
                 }
                 line.start()
-                emit { onPhase("recording") }
-                while (!state.stop.get()) if (readAvailable() == 0) Thread.sleep(10)
-                // Capture is the sole owner of JavaSound. Stop production, then
-                // drain its retained device buffer, with a finite defensive bound.
-                line.stop()
-                var drained = 0
-                while (drained < line.format.sampleRate.toInt() * line.format.frameSize * 2) {
-                    val read = readAvailable()
-                    if (read == 0) break
-                    drained += read
+                lastInput.set(System.nanoTime())
+                val watchdog = synchronized(lock) {
+                    if (state.stop.get() || closed) null else stopper.scheduleWithFixedDelay({
+                        if (!state.stop.get() && state.done.count != 0L) {
+                            val failure = when {
+                                !line.isOpen || !line.isRunning -> "The microphone stopped or disconnected. Audio received so far was saved."
+                                System.nanoTime() - lastInput.get() >= TimeUnit.MILLISECONDS.toNanos(inputStallTimeoutMs) ->
+                                    "The microphone stopped delivering audio samples. Check its connection and Windows microphone access. Audio received so far was saved."
+                                else -> null
+                            }
+                            if (failure != null && state.stop.compareAndSet(false, true)) {
+                                state.error = state.error ?: failure
+                                // Also releases a faulty read which blocked despite available().
+                                runCatching { line.close() }
+                            }
+                        }
+                    }, 50, 50, TimeUnit.MILLISECONDS)
                 }
-                check(line.available() == 0) { "Microphone did not finish draining; the recording may miss its last audio." }
-                if (pending > 0) enqueue(pending)
+                try {
+                    while (!state.stop.get()) {
+                        check(line.isOpen && line.isRunning) { "The microphone stopped or disconnected. Audio received so far was saved." }
+                        if (readAvailable() == 0) Thread.sleep(10)
+                    }
+                    // Stop production, then drain retained device data only while
+                    // the device remains open. A disconnect may already have closed it.
+                    if (line.isOpen) {
+                        line.stop()
+                        var drained = 0
+                        while (drained < line.format.sampleRate.toInt() * line.format.frameSize * 2) {
+                            val read = readAvailable()
+                            if (read == 0) break
+                            drained += read
+                        }
+                        check(line.available() == 0) { "Microphone did not finish draining; the recording may miss its last audio." }
+                    }
+                } finally {
+                    watchdog?.cancel(false)
+                }
             }
         } catch (error: Throwable) {
             state.error = state.error ?: error.message ?: error.javaClass.simpleName
@@ -207,8 +251,16 @@ class DesktopRecorder(
                 state.error = state.error ?: "Could not finalize recorded audio: ${error.message}"
             }
             emit { onLevel(state.durationMs, 0f) }
+            progress(state)
             state.done.countDown()
         }
+    }
+
+    private fun progress(state: Capture) {
+        // Read inference first: capture may advance concurrently, but it always
+        // publishes its duration before making the corresponding PCM readable.
+        val transcribedMs = state.transcribedSamples.get() * 1000 / 16_000
+        emit { onProgress(state.durationMs, transcribedMs) }
     }
 
     private inline fun emit(callback: () -> Unit) {
