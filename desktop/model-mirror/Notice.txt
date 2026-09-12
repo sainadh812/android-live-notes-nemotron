@@ -22,6 +22,8 @@ Nemotron 3.5 ASR Streaming 0.6B (Q4, Q5, Q6 and Q8):
 Original model by NVIDIA Corporation. Licensed under OpenMDW-1.1.
 See licenses/OpenMDW-1.1.txt and the original model card.
 
-The complete original and conversion model cards are included in model-cards/.
+The complete original and conversion model cards are in the model-cards/ folder
+of model-attribution.zip, provided with the models-v1 GitHub release:
+https://github.com/sainadh812/android-live-notes-nemotron/releases/tag/models-v1
 Keep this Notice.txt, the relevant licenses and model origin notices with
 redistributed model copies. No NVIDIA or Moonshine endorsement is implied.

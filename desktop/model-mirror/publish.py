@@ -21,7 +21,7 @@ def digest(path):
 
 
 def find_release(repository, tag):
-    releases = json.loads(gh("api", f"repos/{repository}/releases?per_page=100"))
+    releases = json.loads(gh("api", f"repos/{repository}/releases?per_page=100", "-H", "Cache-Control: no-cache"))
     return next((release for release in releases if release["tag_name"] == tag), None)
 
 
@@ -60,12 +60,17 @@ def main():
 
     release = find_release(repository, tag)
     if release is None:
-        gh("release", "create", tag, "--repo", repository, "--draft", "--prerelease",
-           "--target", os.environ["GITHUB_SHA"], "--title", "LiveMeetingNotes speech models (models-v1)",
-           "--notes-file", str(HERE / "RELEASE_NOTES.md"))
-        release = find_release(repository, tag)
-    if release is None:
-        raise RuntimeError("The draft model release could not be found")
+        # Use the creation response directly: GitHub's release list can briefly
+        # omit a newly created draft, even after the create request succeeds.
+        release = json.loads(gh("api", f"repos/{repository}/releases", "--method", "POST",
+            "-f", f"tag_name={tag}", "-f", f"target_commitish={os.environ['GITHUB_SHA']}",
+            "-f", "name=LiveMeetingNotes speech models (models-v1)",
+            "-f", "body=" + (HERE / "RELEASE_NOTES.md").read_text(encoding="utf-8"),
+            "-F", "draft=true", "-F", "prerelease=true"))
+    elif release["draft"] and not release["assets"]:
+        release = json.loads(gh("api", f"repos/{repository}/releases/{release['id']}", "--method", "PATCH",
+            "-f", f"target_commitish={os.environ['GITHUB_SHA']}",
+            "-f", "body=" + (HERE / "RELEASE_NOTES.md").read_text(encoding="utf-8")))
     existing = {asset["name"]: asset for asset in release["assets"]}
     if set(existing) - set(names):
         raise RuntimeError("Unexpected assets exist in the model release")
@@ -79,8 +84,8 @@ def main():
             gh("release", "upload", tag, str(path), "--repo", repository)
         print(f"Verified or uploaded: {name}", flush=True)
 
-    release = find_release(repository, tag)
-    if release is None or {asset["name"] for asset in release["assets"]} != set(names):
+    release = json.loads(gh("api", f"repos/{repository}/releases/{release['id']}", "-H", "Cache-Control: no-cache"))
+    if {asset["name"] for asset in release["assets"]} != set(names):
         raise RuntimeError("Model release does not contain the complete expected asset set")
     for asset in release["assets"]:
         verify_uploaded(asset, args.assets / asset["name"], expected[asset["name"]])

@@ -166,8 +166,8 @@
   "localAttribution": [
     {
       "fileName": "Notice.txt",
-      "bytes": 1448,
-      "sha256": "53988ff5e937b0b4dbe533e254ca0c6aeddb7169ed2978946b19bc41625823f2"
+      "bytes": 1600,
+      "sha256": "dd25e70f99a04c046f3b4edbfa9432da8eb51cccd0697e56eb341da406de62f2"
     },
     {
       "fileName": "licenses/NVIDIA-Open-Model-License.txt",
