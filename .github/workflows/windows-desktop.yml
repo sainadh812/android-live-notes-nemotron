@@ -32,12 +32,15 @@ jobs:
           cache: pip
           cache-dependency-path: desktop/speaker-worker/requirements.txt
       - name: Compile desktop and run JVM checks
+        id: jvm
         shell: pwsh
         run: ./gradlew.bat -p desktop test --no-daemon --console=plain
       - name: Build pinned Windows speech libraries
+        id: native
         shell: pwsh
         run: ./desktop/native/build-windows.ps1
       - name: Build and verify packaged speaker worker
+        id: worker
         shell: pwsh
         run: ./desktop/speaker-worker/build.ps1
       - name: Real speaker model checks
@@ -49,6 +52,7 @@ jobs:
         shell: pwsh
         run: ./gradlew.bat -p desktop speakerCancellationCheck --no-daemon --console=plain
       - name: Verify real speech model and decoder timing
+        if: ${{ !cancelled() && steps.jvm.outcome == 'success' && steps.native.outcome == 'success' }}
         shell: pwsh
         run: |
           python desktop/scripts/prepare-speech-smoke.py desktop/build/speech-evidence
@@ -59,6 +63,8 @@ jobs:
           $output = Get-Content desktop/build/speech-evidence/result.log -Raw
           if ($output -notmatch 'timed_words=22' -or $output -notmatch 'ask what you can do for your country') { throw 'Incomplete native transcript or word timing' }
       - name: Package Windows installer and portable app
+        id: package
+        if: ${{ !cancelled() && steps.jvm.outcome == 'success' && steps.native.outcome == 'success' && steps.worker.outcome == 'success' }}
         shell: pwsh
         run: |
           ./gradlew.bat -p desktop packageExe packageMsi createDistributable --no-daemon --console=plain
@@ -68,6 +74,8 @@ jobs:
           Copy-Item desktop/build/compose/binaries/main/msi/*.msi desktop/build/release/
           Compress-Archive -Path desktop/build/compose/binaries/main/app/LiveMeetingNotes -DestinationPath desktop/build/release/LiveMeetingNotes-windows-x64-portable.zip
       - name: Install and launch packaged Windows app
+        id: installed
+        if: ${{ !cancelled() && steps.package.outcome == 'success' }}
         shell: pwsh
         run: ./desktop/scripts/test-installed-app.ps1
       - name: Collect release checksums

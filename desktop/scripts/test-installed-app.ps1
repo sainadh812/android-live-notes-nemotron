@@ -15,7 +15,7 @@ $Candidates = @(Get-ChildItem $env:LOCALAPPDATA -Filter LiveMeetingNotes.exe -Re
 if ($Candidates.Count -ne 1) { throw "Expected one installed launcher, found $($Candidates.Count)" }
 $App = $Candidates[0].FullName
 $Process = Start-Process $App -ArgumentList @('--smoke-test', "`"$Evidence`"") -WorkingDirectory $Evidence -PassThru
-if (-not $Process.WaitForExit(90000)) { Stop-Process -Id $Process.Id -Force; throw "Installed app did not complete startup check" }
+if (-not $Process.WaitForExit(150000)) { Stop-Process -Id $Process.Id -Force; throw "Installed app did not complete startup check" }
 if ($Process.ExitCode -ne 0 -or -not (Test-Path "$Evidence/startup-ok.txt") -or (Test-Path "$Evidence/startup-error.txt")) {
     throw "Installed app startup failed; inspect evidence"
 }

@@ -80,6 +80,7 @@ class DiarizationClient(
         Files.createDirectories(workDirectory)
         val job = Files.createTempDirectory(workDirectory, "speaker-job-")
         var process: Process? = null
+        val descendants = linkedMapOf<Long, ProcessHandle>()
         try {
             val command = mutableListOf(executable.toRealPath().toString())
             command += arguments
@@ -119,7 +120,11 @@ class DiarizationClient(
                     }
                 }
             }
-            while (!running.waitFor(100, TimeUnit.MILLISECONDS)) currentCoroutineContext().ensureActive()
+            while (true) {
+                rememberDescendants(running, descendants)
+                if (running.waitFor(100, TimeUnit.MILLISECONDS)) break
+                currentCoroutineContext().ensureActive()
+            }
             currentCoroutineContext().ensureActive()
             stdout.await()
             stderr.await()
@@ -131,11 +136,7 @@ class DiarizationClient(
         } finally {
             // Native ONNX inference need not poll Kotlin cancellation. Stop its process instead.
             process?.let { running ->
-                if (running.isAlive) {
-                    running.descendants().forEach { it.destroyForcibly() }
-                    running.destroyForcibly()
-                    running.waitFor(5, TimeUnit.SECONDS)
-                }
+                stopProcessTree(running, descendants)
                 runCatching { running.inputStream.close() }
                 runCatching { running.errorStream.close() }
             }
@@ -144,6 +145,34 @@ class DiarizationClient(
             listOf("segmentation.onnx.installing", "embedding.onnx.installing").forEach {
                 runCatching { Files.deleteIfExists(modelsDirectory.resolve(it)) }
             }
+        }
+    }
+
+    private fun rememberDescendants(process: Process, descendants: MutableMap<Long, ProcessHandle>) {
+        process.descendants().use { children -> children.forEach { descendants[it.pid()] = it } }
+    }
+
+    private fun stopProcessTree(process: Process, descendants: MutableMap<Long, ProcessHandle>) {
+        rememberDescendants(process, descendants)
+        val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5)
+        descendants.values.toList().asReversed().forEach { if (it.isAlive) it.destroyForcibly() }
+        if (process.isAlive) process.destroyForcibly()
+        // TerminateProcess on Windows is asynchronous. Root exit alone does not mean its
+        // children have stopped using the WAV/models/scratch, including orphaned children.
+        while (true) {
+            rememberDescendants(process, descendants)
+            val alive = descendants.values.filter { it.isAlive }
+            if (!process.isAlive && alive.isEmpty()) return
+            check(System.nanoTime() < deadline) {
+                "Could not stop speaker worker processes ${
+                    (alive.map { it.pid() } + listOfNotNull(process.pid().takeIf { process.isAlive })).joinToString()
+                }; temporary files were retained."
+            }
+            alive.forEach { it.destroyForcibly() }
+            if (process.isAlive) {
+                process.destroyForcibly()
+                process.waitFor(25, TimeUnit.MILLISECONDS)
+            } else Thread.sleep(25)
         }
     }
 
