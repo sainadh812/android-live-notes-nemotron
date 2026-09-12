@@ -372,7 +372,7 @@ private fun RecordingPage(state: AppState, actions: DesktopActions, onRename: (R
     var mergeSource by remember(entry.id) { mutableStateOf<SpeakerName?>(null) }
     LaunchedEffect(scroll) { scroll.interactionSource.interactions.collect { if (it is DragInteraction.Start) follow = false } }
     LaunchedEffect(activeBlock, follow, playing, tab) { if (follow && playing && activeBlock >= 0 && tab == 0) scroll.animateScrollToItem(activeBlock + 1) }
-    val playFrom: (Long) -> Unit = { value -> actions.seekTo(value); if (!playing) actions.playPause() }
+    val playFrom: (Long) -> Unit = actions::playFrom
     Column(Modifier.fillMaxSize().testTag("recording-detail")) {
         Column(Modifier.padding(start = 30.dp, end = 30.dp, top = 18.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {

@@ -22,6 +22,7 @@ import com.sainadh.livenotes.stt.LiveTranscriptBuffer
 import com.sainadh.livenotes.stt.SpeechLanguage
 import com.sainadh.livenotes.stt.SpeechModel
 import com.sainadh.livenotes.stt.TranscriptUpdate
+import com.sainadh.livenotes.stt.TranscriptStatus
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
@@ -82,14 +83,19 @@ class DesktopController(
     private val settingsMutex = Mutex()
     private val secretsMutex = Mutex()
     private var playbackId: String? = null
-    private var playedFile: File? = null
+    @Volatile private var playedFile: File? = null
+    private val desiredPlayback = AtomicBoolean(false)
     private val deletingIds = mutableSetOf<String>()
     private var lastAutomaticSummary = 0L
     private var fullTextRequest = 0L
+    private val summarizedThrough = mutableMapOf<String, Long>()
+    private val pendingSummaries = linkedSetOf<String>()
     private val events = Channel<RecordingEvent>(256)
     private val persistenceErrors = mutableMapOf<String, String>() // Owned by the event consumer.
     private val player = DesktopPlayer { playback ->
-        mutableState.update { it.copy(playback = PlaybackView(playbackId, playback.positionMs, playback.durationMs, playback.isPlaying, playback.speed)) }
+        if (playback.file?.absoluteFile != playedFile?.absoluteFile) return@DesktopPlayer
+        if (playback.error != null || (playback.durationMs > 0 && playback.positionMs >= playback.durationMs)) desiredPlayback.set(false)
+        mutableState.update { it.copy(playback = PlaybackView(playback.file?.nameWithoutExtension, playback.positionMs, playback.durationMs, playback.isPlaying, playback.speed)) }
         playback.error?.let(::showError)
     }
     private val recorder = DesktopRecorder(
@@ -210,7 +216,7 @@ class DesktopController(
     override fun startRecording() {
         if (mutableState.value.capture.active || closed || !ready) return
         if (mutableState.value.speakerJob.active) { showError("Wait for speaker analysis to finish, or cancel it before recording."); return }
-        player.pause()
+        pausePlayback()
         stopRequested.set(false)
         transcript = LiveTranscriptBuffer()
         finishSignal = CompletableDeferred()
@@ -247,7 +253,7 @@ class DesktopController(
     } }
     override fun selectRecording(id: String) {
         loadJob?.cancel()
-        if (playbackId != id) { player.pause(); playbackId = null; playedFile = null }
+        if (playbackId != id) { pausePlayback(); playbackId = null; playedFile = null }
         mutableState.update { it.copy(selected = null, loadingRecording = true) }
         loadJob = launchOperation {
             try {
@@ -257,7 +263,7 @@ class DesktopController(
             } finally { mutableState.update { it.copy(loadingRecording = false) } }
         }
     }
-    override fun closeRecording() { loadJob?.cancel(); player.pause(); mutableState.update { it.copy(selected = null, loadingRecording = false) } }
+    override fun closeRecording() { loadJob?.cancel(); pausePlayback(); mutableState.update { it.copy(selected = null, loadingRecording = false) } }
     private suspend fun reloadSelected(id: String) {
         if (mutableState.value.selected?.entry?.id != id) return
         val document = withContext(Dispatchers.IO) { store.document(id) }
@@ -268,7 +274,7 @@ class DesktopController(
         if (!deletingIds.add(id)) return
         launchOperation { try {
             check(currentId != id && mutableState.value.speakerJob.recordingId != id) { "Wait until this meeting has finished processing." }
-            if (playbackId == id) { withContext(Dispatchers.IO) { player.unload() }; playedFile = null; playbackId = null }
+            if (playbackId == id) { desiredPlayback.set(false); withContext(Dispatchers.IO) { player.unload() }; playedFile = null; playbackId = null }
             withContext(Dispatchers.IO) { store.delete(id) }
             if (mutableState.value.selected?.entry?.id == id) closeRecording()
             refreshLibrary()
@@ -281,6 +287,7 @@ class DesktopController(
         if (!document.entry.hasAudio) { showError("This meeting has no saved audio."); return false }
         val file = paths.audio(document.entry.id)
         if (playedFile != file) {
+            desiredPlayback.set(false)
             playbackId = document.entry.id; playedFile = file
             mutableState.update { it.copy(playback = PlaybackView(recordingId = document.entry.id, durationMs = document.entry.durationMs)) }
             player.load(file)
@@ -289,8 +296,15 @@ class DesktopController(
     }
     override fun playPause() { runCatching {
         if (!preparePlayback()) return
-        if (mutableState.value.playback.playing) player.pause() else player.play()
+        val shouldPlay = !desiredPlayback.get()
+        desiredPlayback.set(shouldPlay)
+        if (shouldPlay) player.play() else player.pause()
     }.onFailure { showError(it.message ?: "Could not play audio.") } }
+    override fun playFrom(positionMs: Long) { runCatching {
+        if (!preparePlayback()) return
+        player.seekTo(positionMs); desiredPlayback.set(true); player.play()
+    }.onFailure { desiredPlayback.set(false); showError(it.message ?: "Could not play audio.") } }
+    private fun pausePlayback() { desiredPlayback.set(false); player.pause() }
     override fun seekTo(positionMs: Long) { runCatching { if (preparePlayback()) player.seekTo(positionMs) }.onFailure { showError(it.message ?: "Could not seek audio.") } }
     override fun setPlaybackSpeed(speed: Float) { runCatching { player.setSpeed(speed) }.onFailure { showError(it.message ?: "Could not change playback speed.") } }
     private suspend fun transcriptFor(id: String?): String = if (id == null) {
@@ -468,22 +482,27 @@ class DesktopController(
         withContext(Dispatchers.IO) { store.assignSpeaker(recordingId, turnId, speakerId) }; reloadSelected(recordingId)
     } }
     override fun summarize(recordingId: String) {
-        if (summaryJob?.isActive == true) return
+        if (summaryJob?.isActive == true) { pendingSummaries += recordingId; return }
         mutableState.update { it.copy(summaryBusy = true) }
         val settings = mutableState.value.settings
+        val live = currentId == recordingId
         summaryJob = launchOperation {
             try {
                 val key = withContext(Dispatchers.IO) { secrets.read(settings.providerId) }
                 check(key.isNotBlank()) { "Save your AI provider API key in Settings first." }
-                val segments = withContext(Dispatchers.IO) { store.segments(recordingId) }
+                val segments = withContext(Dispatchers.IO) { store.segments(recordingId) }.let { all ->
+                    if (live) all.filter { it.status == TranscriptStatus.FINAL && it.segmentId > (summarizedThrough[recordingId] ?: -1L) }
+                    else all
+                }
+                if (live && segments.none { it.text.isNotBlank() }) return@launchOperation
                 check(segments.any { it.text.isNotBlank() }) { "There is no transcript to summarize yet." }
-                // Bound individual requests; process every segment in chronological order.
-                // Rebuild from the snapshot so revised tentative text never accumulates twice.
+                // Live summaries process newly finalized segments once. Revisable text is
+                // included in the explicit saved-meeting pass, with its uncertainty status.
                 val batches = mutableListOf<List<SummaryPiece>>()
                 var batch = mutableListOf<SummaryPiece>()
                 var chars = 0
                 for (segment in segments) {
-                    val pieces = segment.text.chunked(8_000).ifEmpty { listOf("") }
+                    val pieces = safeTextChunks(segment.text, 8_000).ifEmpty { listOf("") }
                     pieces.forEachIndexed { part, text ->
                         if (batch.isNotEmpty() && chars + text.length > 12_000) { batches += batch; batch = mutableListOf(); chars = 0 }
                         batch += SummaryPiece("${segment.segmentId}:$part", text, segment.status.name, segment.appendToPrevious || part > 0)
@@ -491,9 +510,10 @@ class DesktopController(
                     }
                 }
                 if (batch.isNotEmpty()) batches += batch
-                var summary = ""
-                var context = ""
-                var actions = emptyList<String>()
+                val prior = if (live) withContext(Dispatchers.IO) { store.summaryState(recordingId) } else Triple("", "", emptyList())
+                var summary = prior.first
+                var context = prior.second
+                var actions = prior.third
                 for (pieces in batches) {
                     ensureActive()
                     val payload = buildJsonArray { pieces.forEach { piece -> add(buildJsonObject {
@@ -506,12 +526,29 @@ class DesktopController(
                     summary = result.summary; context = result.runningContext; actions = (actions + result.actionItems).distinct()
                 }
                 withContext(Dispatchers.IO) { store.saveSummary(recordingId, summary, context, actions) }
+                if (live) summarizedThrough[recordingId] = segments.maxOf { it.segmentId }
+                else summarizedThrough.remove(recordingId)
                 reloadSelected(recordingId)
                 if (currentId != recordingId) showNotice("Meeting summary saved.")
-            } finally { mutableState.update { it.copy(summaryBusy = false) } }
+            } finally {
+                mutableState.update { it.copy(summaryBusy = false) }
+                summaryJob = null
+                if (!closed) pendingSummaries.firstOrNull()?.let { next ->
+                    pendingSummaries.remove(next)
+                    scope.launch { summarize(next) }
+                }
+            }
         }
     }
     private data class SummaryPiece(val id: String, val text: String, val status: String, val append: Boolean)
+    private fun safeTextChunks(text: String, maxChars: Int): List<String> = buildList {
+        var start = 0
+        while (start < text.length) {
+            var end = minOf(start + maxChars, text.length)
+            if (end < text.length && text[end].isLowSurrogate() && text[end - 1].isHighSurrogate()) end--
+            add(text.substring(start, end)); start = end
+        }
+    }
 
     /** Window close awaits saved PCM, database writes, and process shutdown. */
     suspend fun shutdown() {

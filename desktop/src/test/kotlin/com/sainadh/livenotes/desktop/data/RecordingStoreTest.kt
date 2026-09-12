@@ -19,7 +19,8 @@ class RecordingStoreTest {
         RecordingStore(paths).use { store ->
             store.begin(id, 1_000)
             repeat(7_200) { index ->
-                val partial = TranscriptUpdate(index.toLong(), "draft ", TranscriptStatus.PARTIAL, true, index * 500L, (index + 1) * 500L)
+                val partial = TranscriptUpdate(index.toLong(), "draft ", TranscriptStatus.PARTIAL,
+                    appendToPrevious = true, startMs = index * 500L, endMs = (index + 1) * 500L)
                 val final = partial.copy(text = "word$index ", status = TranscriptStatus.FINAL)
                 store.saveSegment(id, partial); store.saveSegment(id, final)
                 val preview = checkNotNull(live.update(final))
@@ -51,7 +52,7 @@ class RecordingStoreTest {
             val document = checkNotNull(store.document(id))
             assertTrue(document.entry.hasAudio)
             assertTrue(document.entry.interrupted)
-            assertEquals(100, document.entry.durationMs)
+            assertEquals(100L, document.entry.durationMs)
             assertEquals("unfinished words", document.text)
             assertEquals(TranscriptStatus.INTERRUPTED, store.segments(id).single().status)
         }

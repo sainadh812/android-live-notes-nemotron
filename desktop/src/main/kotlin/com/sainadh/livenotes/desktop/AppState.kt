@@ -110,6 +110,7 @@ interface DesktopActions {
     fun renameRecording(id: String, title: String)
     fun deleteRecording(id: String)
     fun playPause()
+    fun playFrom(positionMs: Long)
     fun seekTo(positionMs: Long)
     fun setPlaybackSpeed(speed: Float)
     fun copyTranscript(recordingId: String?)

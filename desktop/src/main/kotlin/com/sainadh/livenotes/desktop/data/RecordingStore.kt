@@ -116,6 +116,10 @@ class RecordingStore(private val paths: AppPaths) : AutoCloseable {
         require(title.trim().isNotEmpty()); update("UPDATE recordings SET title=? WHERE id=?", title.trim().take(120), id)
     }
     @Synchronized fun summaryContext(id: String): String = query("SELECT context FROM recordings WHERE id=?", id) { it.getString(1) }.firstOrNull().orEmpty()
+    @Synchronized fun summaryState(id: String): Triple<String, String, List<String>> = query(
+        "SELECT summary,context,actions FROM recordings WHERE id=?", id) {
+        Triple(it.getString(1), it.getString(2), json.decodeFromString<List<String>>(it.getString(3)))
+    }.firstOrNull() ?: Triple("", "", emptyList())
     @Synchronized fun saveSummary(id: String, summary: String, context: String, actions: List<String>) {
         update("UPDATE recordings SET summary=?,context=?,actions=? WHERE id=?", summary, context, json.encodeToString(actions), id)
     }

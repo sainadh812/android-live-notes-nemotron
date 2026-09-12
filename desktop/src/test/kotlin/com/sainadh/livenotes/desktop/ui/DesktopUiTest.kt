@@ -47,6 +47,9 @@ class DesktopUiTest {
             playback = PlaybackView(document.entry.id, 1_000, document.entry.durationMs)), actions)
         compose.onNodeWithTag("nav-library").performClick()
         compose.onNodeWithText("Design review · September").assertExists()
+        repeat(2) { compose.onNodeWithText("00:00").performClick() }
+        assertEquals(listOf(0L, 0L), actions.playedFrom)
+        assertEquals(0, actions.playPauseCalls)
         screenshot("playback")
         compose.onNodeWithText("Speakers").performClick()
         compose.onNodeWithText("Analyze speakers again").performClick()
@@ -104,6 +107,8 @@ class DesktopUiTest {
         var requestedCount: Int? = null
         var merged: Pair<String, String>? = null
         var key: String? = null
+        val playedFrom = mutableListOf<Long>()
+        var playPauseCalls = 0
         override fun startRecording() = Unit
         override fun stopRecording() = Unit
         override fun refreshMicrophones() = Unit
@@ -111,7 +116,8 @@ class DesktopUiTest {
         override fun closeRecording() = Unit
         override fun renameRecording(id: String, title: String) = Unit
         override fun deleteRecording(id: String) = Unit
-        override fun playPause() = Unit
+        override fun playPause() { playPauseCalls++ }
+        override fun playFrom(positionMs: Long) { playedFrom += positionMs }
         override fun seekTo(positionMs: Long) = Unit
         override fun setPlaybackSpeed(speed: Float) = Unit
         override fun copyTranscript(recordingId: String?) { copyCalls++; copiedRecording = recordingId }
