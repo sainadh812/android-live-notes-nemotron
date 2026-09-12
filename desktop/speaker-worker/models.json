@@ -1,0 +1,27 @@
+{
+  "schemaVersion": 1,
+  "id": "pyannote3-titanet-small-2024-10",
+  "files": [
+    {
+      "name": "segmentation.onnx",
+      "sourceUrl": "https://api.github.com/repos/k2-fsa/sherpa-onnx/releases/assets/197666131",
+      "sourceSha256": "24615ee884c897d9d2ba09bb4d30da6bb1b15e685065962db5b02e76e4996488",
+      "sourceSize": 6958444,
+      "archiveMember": "sherpa-onnx-pyannote-segmentation-3-0/model.onnx",
+      "sha256": "220ad67ca923bef2fa91f2390c786097bf305bceb5e261d4af67b38e938e1079",
+      "size": 5992913,
+      "license": "MIT",
+      "provenance": "https://k2-fsa.github.io/sherpa/onnx/speaker-diarization/models.html"
+    },
+    {
+      "name": "embedding.onnx",
+      "sourceUrl": "https://api.github.com/repos/k2-fsa/sherpa-onnx/releases/assets/198917204",
+      "sourceSha256": "ad4a1802485d8b34c722d2a9d04249662f2ece5d28a7a039063ca22f515a789e",
+      "sourceSize": 40257283,
+      "sha256": "ad4a1802485d8b34c722d2a9d04249662f2ece5d28a7a039063ca22f515a789e",
+      "size": 40257283,
+      "license": "Apache-2.0",
+      "provenance": "https://catalog.ngc.nvidia.com/orgs/nvidia/nemo/models/titanet_small"
+    }
+  ]
+}

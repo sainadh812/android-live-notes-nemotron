@@ -1,0 +1,11 @@
+/build/
+/.gradle/
+/native/build*/
+/native/engine/
+/resources/windows-x64/native/
+/resources/windows-x64/speaker-worker/
+/speaker-worker/.venv/
+/speaker-worker/build/
+/speaker-worker/dist/
+__pycache__/
+*.pyc
