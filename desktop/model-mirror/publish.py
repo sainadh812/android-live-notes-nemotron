@@ -1,10 +1,12 @@
 """Publish only verified model assets; never replace a differing release asset."""
 import argparse
 import hashlib
+import http.client
 import json
 import os
 from pathlib import Path
 import subprocess
+import urllib.parse
 
 HERE = Path(__file__).resolve().parent
 
@@ -22,7 +24,35 @@ def digest(path):
 
 def find_release(repository, tag):
     releases = json.loads(gh("api", f"repos/{repository}/releases?per_page=100", "-H", "Cache-Control: no-cache"))
-    return next((release for release in releases if release["tag_name"] == tag), None)
+    matches = [release for release in releases if release["tag_name"] == tag or (
+        release["draft"] and release["tag_name"].startswith("untagged-")
+        and release["name"] == "LiveMeetingNotes speech models (models-v1)")]
+    if len(matches) > 1:
+        raise RuntimeError("Multiple model mirror drafts exist; refusing to choose one")
+    return next(iter(matches), None)
+
+
+def upload(repository, release_id, path):
+    # Address the release by ID. Draft tags can appear as GitHub's temporary
+    # untagged-* name, which makes gh release upload's tag lookup unreliable.
+    connection = http.client.HTTPSConnection("uploads.github.com", timeout=1800)
+    endpoint = f"/repos/{repository}/releases/{release_id}/assets?" + urllib.parse.urlencode({"name": path.name})
+    try:
+        with path.open("rb") as stream:
+            connection.request("POST", endpoint, body=stream, headers={
+                "Authorization": "Bearer " + os.environ["GH_TOKEN"],
+                "User-Agent": "LiveMeetingNotes-model-mirror/1",
+                "Accept": "application/vnd.github+json",
+                "Content-Type": "application/octet-stream",
+                "Content-Length": str(path.stat().st_size),
+            })
+            response = connection.getresponse()
+            body = response.read()
+            if response.status != 201:
+                raise RuntimeError(f"GitHub upload failed for {path.name}: HTTP {response.status}")
+            return json.loads(body)
+    finally:
+        connection.close()
 
 
 def verify_uploaded(asset, path, expected):
@@ -69,6 +99,7 @@ def main():
             "-F", "draft=true", "-F", "prerelease=true"))
     elif release["draft"] and not release["assets"]:
         release = json.loads(gh("api", f"repos/{repository}/releases/{release['id']}", "--method", "PATCH",
+            "-f", f"tag_name={tag}", "-F", "draft=true", "-F", "prerelease=true",
             "-f", f"target_commitish={os.environ['GITHUB_SHA']}",
             "-f", "body=" + (HERE / "RELEASE_NOTES.md").read_text(encoding="utf-8")))
     existing = {asset["name"]: asset for asset in release["assets"]}
@@ -81,7 +112,8 @@ def main():
         else:
             if not release["draft"]:
                 raise RuntimeError("Published model release is incomplete; refusing to mutate it")
-            gh("release", "upload", tag, str(path), "--repo", repository)
+            asset = upload(repository, release["id"], path)
+            verify_uploaded(asset, path, expected[name])
         print(f"Verified or uploaded: {name}", flush=True)
 
     release = json.loads(gh("api", f"repos/{repository}/releases/{release['id']}", "-H", "Cache-Control: no-cache"))
@@ -90,7 +122,8 @@ def main():
     for asset in release["assets"]:
         verify_uploaded(asset, args.assets / asset["name"], expected[asset["name"]])
     if release["draft"]:
-        gh("release", "edit", tag, "--repo", repository, "--draft=false", "--prerelease")
+        gh("api", f"repos/{repository}/releases/{release['id']}", "--method", "PATCH",
+           "-f", f"tag_name={tag}", "-F", "draft=false", "-F", "prerelease=true")
     print(f"Published verified model mirror: https://github.com/{repository}/releases/tag/{tag}")
 
 
