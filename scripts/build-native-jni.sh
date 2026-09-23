@@ -7,7 +7,7 @@ build_dir="${NEMOTRON_NATIVE_BUILD_DIR:-$repo_dir/build/native-jni}"
 include_dir="$build_dir/include"
 library_dir="$repo_dir/app/src/main/jniLibs/arm64-v8a"
 transcribe_commit=63a44d9239d610b3908e8a66b384924cd4a77217
-transcribe_sha256=d3a74372c6e0447890d7c83a59809dbbbefff7bfd8eacce6d5474b2bfa4bd1f9
+transcribe_sha256=0d2764fa7bca9cf4ecdceae93c14b63c407d69742187a190aba044b7dcd2216c
 ndk_version=27.2.12479018
 
 if [[ $# -gt 1 || (${1:-} != "" && ${1:-} != --test) ]]; then

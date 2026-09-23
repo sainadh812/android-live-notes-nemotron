@@ -26,6 +26,29 @@ The headers are pinned to transcribe.cpp commit
 deliberately updating these pins and checking its ABI; this script rebuilds
 only the JNI bridge, using the existing engine and ggml libraries.
 
+## Rebuilding the engine for 16 KB pages
+
+`scripts/build-native-engine.sh` builds the same pinned upstream commit with
+NDK r27c and both `max-page-size=16384` and `common-page-size=16384` linker flags.
+It stages replacements for `libggml.so` and `libtranscribe.so`, preserving the
+existing CPU kernels. It verifies exported symbols, library dependencies, LOAD
+alignment, and GNU_RELRO end alignment for the proposed five-library package.
+
+```sh
+ANDROID_NDK_HOME=/path/to/android-sdk/ndk/27.2.12479018 scripts/build-native-engine.sh
+```
+
+The default source checkout, build, and staged outputs live under ignored
+`build/native-engine/`. To reuse a clean checkout of the pinned commit, set
+`NEMOTRON_ENGINE_SOURCE_DIR`; `NEMOTRON_ENGINE_BUILD_DIR` selects another build
+directory. The script needs Git, CMake, Ninja, Python 3, and ripgrep and limits
+compilation to two jobs. By default, it does not change packaged libraries.
+
+After other Android builds have finished, rerun with `--install` to copy the two
+validated libraries and update the engine SHA-256 pin in `build-native-jni.sh`.
+Then rebuild the Android app. A device test with 16 KB pages is still required;
+static alignment and symbol checks do not exercise the Android loader or models.
+
 ## Contract regression tests
 
 ```sh

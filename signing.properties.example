@@ -1,0 +1,8 @@
+# Copy this file to signing.properties, which is ignored by Git.
+# Keep the upload keystore and its passwords in a private, backed-up location.
+# Use an absolute path or a path relative to the repository root.
+# On Windows, use forward slashes in the path, for example C:/private/upload.jks.
+storeFile=/absolute/path/to/upload.jks
+storePassword=REPLACE_WITH_PRIVATE_STORE_PASSWORD
+keyAlias=upload
+keyPassword=REPLACE_WITH_PRIVATE_KEY_PASSWORD

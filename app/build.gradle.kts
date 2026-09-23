@@ -17,18 +17,22 @@ plugins {
 val previewBuild = providers.gradleProperty("previewBuild").orNull == "true"
 // Instrumented JVM/UI tests use x86 Android; published phone APKs always retain ARM JNI.
 val emulatorTests = providers.gradleProperty("emulatorTests").orNull == "true"
+val signingPropertiesFile = rootProject.file("signing.properties")
+val releaseSigningProperties = Properties().apply {
+    if (signingPropertiesFile.isFile) signingPropertiesFile.inputStream().use(::load)
+}
 
 android {
     namespace = "com.sainadh.livenotes"
-    compileSdk = 35
+    compileSdk = 36
     ndkVersion = "27.2.12479018"
 
     defaultConfig {
         applicationId = if (emulatorTests) "com.sainadh.livenotes.emulatortest" else if (previewBuild) "com.sainadh.livenotes.preview" else "com.sainadh.livenotes"
         minSdk = 26
-        targetSdk = 35
-        versionCode = 5
-        versionName = if (emulatorTests) "1.1.0-emulator-test" else if (previewBuild) "1.1.0-preview" else "1.1.0"
+        targetSdk = 36
+        versionCode = 6
+        versionName = if (emulatorTests) "1.1.1-emulator-test" else if (previewBuild) "1.1.1-preview" else "1.1.1"
         manifestPlaceholders["appLabel"] = if (previewBuild) "LiveMeetingNotes Preview" else "@string/app_name"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
@@ -57,6 +61,15 @@ android {
 
     if (emulatorTests) sourceSets.getByName("main").jniLibs.setSrcDirs(emptyList<String>())
 
+    signingConfigs {
+        create("release") {
+            storeFile = releaseSigningProperties.getProperty("storeFile")?.let { rootProject.file(it) }
+            storePassword = releaseSigningProperties.getProperty("storePassword")
+            keyAlias = releaseSigningProperties.getProperty("keyAlias")
+            keyPassword = releaseSigningProperties.getProperty("keyPassword")
+        }
+    }
+
     buildTypes {
         debug {
             // Instrumentation loads code from a separate APK. Keep shared Kotlin
@@ -71,7 +84,7 @@ android {
         release {
             isMinifyEnabled = true
             isShrinkResources = true
-            signingConfig = signingConfigs.getByName("debug")
+            signingConfig = signingConfigs.getByName("release")
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
@@ -102,6 +115,31 @@ android {
             excludes += "/META-INF/{AL2.0,LGPL2.1}"
         }
     }
+}
+
+val verifyReleaseConfiguration by tasks.registering {
+    group = "verification"
+    description = "Requires production app settings and a private upload key for release builds."
+    doLast {
+        check(!previewBuild && !emulatorTests) {
+            "Release builds require the production package. Remove -PpreviewBuild and -PemulatorTests."
+        }
+        check(signingPropertiesFile.isFile) {
+            "Release signing is not configured. Copy signing.properties.example to signing.properties and configure your private upload key."
+        }
+        check(listOf("storeFile", "storePassword", "keyAlias", "keyPassword").all {
+            !releaseSigningProperties.getProperty(it).isNullOrBlank()
+        }) {
+            "signing.properties must contain storeFile, storePassword, keyAlias, and keyPassword."
+        }
+        check(rootProject.file(releaseSigningProperties.getProperty("storeFile")).isFile) {
+            "The upload keystore specified by storeFile in signing.properties does not exist."
+        }
+    }
+}
+
+tasks.matching { it.name == "preReleaseBuild" }.configureEach {
+    dependsOn(verifyReleaseConfiguration)
 }
 
 val verifyNativeJni by tasks.registering {

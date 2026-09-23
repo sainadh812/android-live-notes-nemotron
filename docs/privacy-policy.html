@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Live Meeting Notes Privacy Policy</title>
+  <style>
+    :root { color-scheme: light; font-family: system-ui, sans-serif; color: #203632; background: #f6f5f0; }
+    body { margin: 0; }
+    main { max-width: 760px; margin: 0 auto; padding: 40px 22px 64px; }
+    h1 { font-size: 2.25rem; line-height: 1.1; }
+    h2 { margin-top: 2rem; }
+    p, li { line-height: 1.65; }
+    a { color: #17695b; }
+    .meta { color: #60716b; }
+  </style>
+</head>
+<body>
+<main>
+  <h1>Live Meeting Notes Privacy Policy</h1>
+  <p class="meta">Effective September 23, 2026<br>Developer: Oh-my-pi<br>Privacy contact: <a href="mailto:Venkatasainadh.duppalapudi@gmail.com">Venkatasainadh.duppalapudi@gmail.com</a></p>
+
+  <p>Live Meeting Notes helps you record speech, save transcripts, and optionally generate AI summaries and action items. This policy explains how the Android app handles your information.</p>
+
+  <h2>Recording and transcription</h2>
+  <p>The app accesses your microphone when you start recording and grant microphone permission. Recording can continue while the app is in the background, using an Android foreground recording service and notification. You can stop recording from the app or recording notification. Bluetooth permission supports compatible Bluetooth microphones; notification permission supports recording notifications.</p>
+  <p>Android speech recognition uses your device's selected speech service. Depending on that service and its settings, microphone audio may be sent to the service's servers. The app saves the returned transcript but does not save replayable audio in this mode. The service provider's terms and privacy practices apply.</p>
+  <p>Downloaded speech models process audio on your device and save audio and transcripts in the app's private storage. Downloading a model requires an internet connection. On-device transcription does not send audio to the AI summary providers.</p>
+
+  <h2>Optional AI summaries</h2>
+  <p>If you save your own AI provider API key, the app automatically sends transcript updates to your selected provider to generate summaries, running context, and action items. Requests include transcript text, previous summaries and context, recording and segment identifiers, processing metadata, the selected model, and your API key for authentication. The app sends these requests directly to OpenAI, DeepSeek, or Alibaba Cloud's Qwen service according to your selection. It does not send the saved audio file to these summary APIs.</p>
+  <p>You can record and transcribe without configuring AI summaries. Once a key is saved, this version has no separate disable-AI or remove-key button. Clearing the app's storage in Android settings removes the saved key and all other local app data. Revoking a key through its provider prevents future successful use but does not remove data previously sent to that provider.</p>
+  <p>Provider handling, retention, account settings, and processing locations are governed by the applicable API service terms. We do not promise that requests are never retained or used beyond immediate processing. Consult the applicable API terms and privacy information for <a href="https://openai.com/policies/privacy-policy/">OpenAI</a>, <a href="https://cdn.deepseek.com/policies/en-US/deepseek-privacy-policy.html">DeepSeek</a>, and <a href="https://www.alibabacloud.com/help/en/legal/latest/alibaba-cloud-international-website-privacy-policy">Alibaba Cloud</a>.</p>
+
+  <h2>Local storage and Android backups</h2>
+  <p>The app stores transcripts, recording titles and dates, audio metadata, summaries, context, and action items locally. Downloaded-model recordings also include audio and word timing information. The app stores your API key in encrypted app preferences protected by an Android cryptographic key. Recordings and the notes database do not have additional app-level encryption.</p>
+  <p>Depending on your device and backup settings, Android may back up or transfer the app's notes database and speech settings. The database includes transcripts and summaries. The app's backup rules exclude saved audio, downloaded models, and encrypted preferences containing API credentials. A restored transcript may therefore not have its original audio.</p>
+
+  <h2>Downloads, exports, and network information</h2>
+  <p>Model downloads connect to Hugging Face and its delivery services. These requests do not include meeting text or audio. Internet services receive connection information such as your IP address. When you choose to copy, share, or export content, the selected app, clipboard, or storage destination receives it and applies its own privacy practices.</p>
+  <p>The app's AI and model-download connections use HTTPS. A device-provided speech service controls its own network processing. The app does not include advertising, analytics, or crash-reporting SDKs, and it does not provide an app account or in-app purchasing system.</p>
+
+  <h2>Retention and deletion</h2>
+  <p>Local notes and recordings remain in the app until its data is removed; the app does not automatically expire them. This version does not include individual recording or note deletion. To remove local recordings, transcripts, summaries, settings, and API credentials, use Android Settings → Apps → Live Meeting Notes → Storage → Clear storage. Device wording may vary.</p>
+  <p>Clearing local storage does not delete existing Android backups, exported files, clipboard copies, or information already sent to external providers. Manage backup copies through your device or backup account, delete exports where you saved them, and use the relevant provider's controls for provider-held data.</p>
+
+  <h2>Contact</h2>
+  <p>For privacy questions, contact <a href="mailto:Venkatasainadh.duppalapudi@gmail.com">Venkatasainadh.duppalapudi@gmail.com</a>.</p>
+</main>
+</body>
+</html>

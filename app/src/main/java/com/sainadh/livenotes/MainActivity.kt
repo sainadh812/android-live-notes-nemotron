@@ -556,6 +556,7 @@ private fun LiveNotesScreen(viewModel: MainViewModel, activityLifecycle: Lifecyc
                             onTestConnection = { viewModel.testConnection(selectedProvider, selectedModel, apiKey) }
                         )
                     }
+                    item { PrivacySettingsPanel() }
                     item { Text("Live Notes  ·  ${BuildConfig.VERSION_NAME}", modifier = Modifier.fillMaxWidth(), style = MaterialTheme.typography.bodySmall, color = Muted) }
                 }
             }
@@ -681,6 +682,30 @@ private fun AiSettingsPanel(
             modifier = Modifier.fillMaxWidth().heightIn(min = 52.dp), shape = RoundedCornerShape(16.dp)
         ) { Text("Test connection") }
         Text(connectionStatus, style = MaterialTheme.typography.bodySmall, color = Muted)
+    }
+}
+
+@Composable
+private fun PrivacySettingsPanel() {
+    SettingsSection("Privacy", "How Live Meeting Notes handles your information.", NoteIcon.SETTINGS) {
+        Text("Effective September 23, 2026 · Developer: Oh-my-pi", style = MaterialTheme.typography.bodySmall, color = Muted)
+        Text(
+            "The microphone is used after you start a recording. Android speech recognition may send audio to your device's speech-service provider. Downloaded speech models process audio on your phone and save recordings in private app storage.",
+            style = MaterialTheme.typography.bodyMedium
+        )
+        Text(
+            "AI summaries are optional. After you save a provider API key, transcript updates, previous summaries, context, identifiers, and the key are sent to the selected OpenAI, DeepSeek, or Qwen service. Saved audio is not sent to those summary services.",
+            style = MaterialTheme.typography.bodyMedium
+        )
+        Text(
+            "Transcripts, summaries, action items, and settings stay in app storage. Android backup may include the notes database and speech settings; audio, downloaded models, and encrypted API-key preferences are excluded. The app contains no ads, analytics, or Live Meeting Notes account system.",
+            style = MaterialTheme.typography.bodyMedium
+        )
+        Text(
+            "This version does not provide individual note deletion. Android's Clear storage control removes local app data. It does not remove exported copies, Android backups, or information already handled by external providers.",
+            style = MaterialTheme.typography.bodyMedium
+        )
+        Text("Privacy questions: Venkatasainadh.duppalapudi@gmail.com", style = MaterialTheme.typography.bodySmall, color = Teal)
     }
 }
 

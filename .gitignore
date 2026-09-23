@@ -3,6 +3,7 @@
 .kotlin/
 
 local.properties
+signing.properties
 *.iml
 *.jks
 *.keystore
