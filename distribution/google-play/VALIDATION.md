@@ -1,3 +1,9 @@
+# Billing update validation (1.2.0, version code 7)
+
+GitHub Actions validation for the billing update is recorded in `BILLING-SETUP.md`. The historical 1.1.1 evidence below does not validate the new billing flow. Real Google Play checkout needs activated Console products, a billing-enabled bundle, license testers, and device tests.
+
+---
+
 # Android release validation — 23 September 2026
 
 Release candidate: **LiveMeetingNotes 1.1.1**, version code **6**, package `com.sainadh.livenotes`.

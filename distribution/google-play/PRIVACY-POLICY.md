@@ -1,6 +1,6 @@
 # Live Meeting Notes — Privacy Policy
 
-Effective date: **September 23, 2026**<br>
+Effective date: **September 27, 2026**<br>
 Developer: **Oh-my-pi**<br>
 Privacy contact: **Venkatasainadh.duppalapudi@gmail.com**
 
@@ -39,7 +39,7 @@ Model downloads connect to Hugging Face and its delivery services. These downloa
 
 When you choose to share, copy or export content, the selected app, clipboard or storage destination receives that content. Those copies are outside this app's private storage and are subject to the receiving service's practices.
 
-The app's own AI and model-download connections use HTTPS. A device-provided speech recognition service controls its own network processing. The app does not include advertising, analytics or crash-reporting SDKs, and does not provide an app account or in-app purchasing system.
+The app's own AI and model-download connections use HTTPS. A device-provided speech recognition service controls its own network processing. The app does not display ads or provide an app account. Optional purchases use Google Play Billing and its supporting Google libraries.
 
 ## Retention and deletion
 
@@ -48,3 +48,9 @@ Local notes and recordings remain in the app until its data is removed; the app 
 Clearing local storage does not itself delete existing backup copies, exported files, clipboard copies, or information already sent to external providers. Manage Android backup copies through your device or backup account controls, delete exports where you saved them, and use the relevant provider's privacy or account controls for provider-held data. The developer cannot access and erase private recordings stored only on your device.
 
 For privacy inquiries, contact **Venkatasainadh.duppalapudi@gmail.com**.
+
+## Optional support purchases
+
+Google Play provides product prices, purchase status, identifiers and purchase tokens. The app holds these in memory and sends tokens back to Play to complete repeatable support purchases and recover unfinished payments. This version has no developer billing server and does not save purchase history. Currency comes from the Play account's country; the app does not request location permission for pricing.
+
+Google handles payment details and retains transaction records under its [privacy policy](https://policies.google.com/privacy). The app never receives card numbers or bank details. Google's billing libraries may handle purchase-related service diagnostics. Clearing app storage does not delete Google's transaction records; manage purchases and refunds through Google Play.

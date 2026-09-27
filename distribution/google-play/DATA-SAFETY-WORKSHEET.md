@@ -1,6 +1,6 @@
 # Google Play Data safety worksheet — Live Meeting Notes
 
-**WORKING DRAFT — NOT READY TO SUBMIT.** Based on Android source reviewed on 23 September 2026. Package: `com.sainadh.livenotes`. Fill the verification gaps below before entering final answers in Play Console. This is a code-based inventory, not confirmation of external providers' contracts or retention practices.
+**WORKING DRAFT — NOT READY TO SUBMIT.** Original inventory from 23 September 2026; billing additions reviewed on 27 September 2026. Package: `com.sainadh.livenotes`. Fill the verification gaps below before entering final answers in Play Console. This is a code-based inventory, not confirmation of external providers' contracts or retention practices.
 
 ## Form starting points
 
@@ -9,8 +9,8 @@
 | Does the app collect data? | **Yes.** Configured AI summaries transmit meeting text and credentials off-device. Do not answer “No” merely because users supply their own keys or can use another mode. |
 | App account creation | **No app account system.** External AI provider accounts and API credentials are separate. |
 | Advertising | No advertising SDK, advertising identifier access or ad display found. |
-| Analytics / crash reporting | No analytics or crash-reporting SDK or upload endpoint found. Android platform diagnostics are separate. |
-| In-app purchases | No billing SDK or purchase flow found. Do not infer the intended Play listing price from this. |
+| Analytics / crash reporting | No developer analytics or crash-reporting endpoint. Review Google Play Billing and its transitive Google libraries for purchase-service diagnostics before submission. |
+| In-app purchases | Google Play Billing 9.1.0; optional one-time support purchases. App download is free. |
 | Privacy policy URL | **Pending:** host `PRIVACY-POLICY.md` at a public, stable URL and enter that URL. Developer: Oh-my-pi; privacy email: Venkatasainadh.duppalapudi@gmail.com. |
 | Privacy policy inside app | The Android Settings screen includes privacy information and the privacy contact. Add the hosted URL later if a clickable web policy is preferred. |
 | Encryption in transit | App-owned AI and download URLs use HTTPS; cleartext is disabled. **Final all-data answer pending** verification of speech-service handling and other applicable flows. |
@@ -78,3 +78,9 @@ Paths below are relative to `app/src/main/java/com/sainadh/livenotes/`, except w
 | Backup / cleartext policy | `app/src/main/AndroidManifest.xml:23`; `app/src/main/res/xml/backup_rules.xml`; `app/src/main/res/xml/data_extraction_rules.xml`; `app/src/main/res/xml/network_security_config.xml` |
 
 Recheck these documents whenever the release changes providers, permissions, telemetry, backup rules or deletion controls.
+
+## Billing update (1.2.0)
+
+- The app obtains formatted prices, currency, product identifiers, purchase state and tokens through Google Play Billing. It sends tokens back to Play to consume successful purchases. No developer billing backend, persistent purchase history, app account, GPS country lookup, or card/bank detail collection is implemented.
+- Google handles checkout and transaction records. Review the payment-service exception in [Data safety guidance](https://support.google.com/googleplay/android-developer/answer/10787469) and distinguish payment details the app never receives from purchase status/tokens it processes. Do not automatically mark every financial category absent.
+- Review the final Billing SDK/transitive dependency inventory and service diagnostics against current Google disclosure guidance. This worksheet remains a draft until those answers and the existing AI/speech questions are resolved.

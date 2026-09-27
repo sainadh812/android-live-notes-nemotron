@@ -80,6 +80,23 @@ class SupportPurchasesTest {
         assertTrue(store.consumed.isEmpty())
     }
 
+    @Test fun lostConsumeResponseDoesNotPermanentlyBlockPurchases() {
+        val store = FakeStore(listOf(inr))
+        val controller = SupportPurchases(store)
+        store.owned = listOf(SupportPurchase("lost-response", listOf(product), false))
+        store.consumeResult = Result.failure(IllegalStateException("offline"))
+        controller.refresh()
+        assertTrue(controller.state.value.unconfirmedProducts.isNotEmpty())
+        // Play completed consumption; the client never received the successful response.
+        store.owned = emptyList()
+        controller.refresh()
+        assertTrue(controller.state.value.unconfirmedProducts.isEmpty())
+        assertFalse(controller.state.value.thanked)
+        var launched = false
+        controller.buy(product) { launched = true; Result.success(Unit) }
+        assertTrue(launched)
+    }
+
     @Test fun checkoutCannotStartWhileRecoveryQueryIsOutstanding() {
         val store = FakeStore(listOf(inr))
         store.deferRecovery = true

@@ -27,6 +27,9 @@ Copy your notes, share transcript text or saved audio with an app you choose, an
 CHOOSE HOW SPEECH IS PROCESSED
 Downloaded speech models process audio on your phone after download. Android speech recognition may send audio to your device's speech-service provider. Optional AI summaries use the selected provider's online service. Stored notes and settings may be included in Android backup; audio recordings and downloaded models are excluded by the app's backup rules.
 
+OPTIONAL SUPPORT
+The app is free to download and use. You can buy a virtual coffee through Google Play to support development. Choose from four locally priced options, with no subscription or feature restrictions. External AI provider charges may still apply.
+
 Requires Android 8 or later on a supported 64-bit ARM device. Speech models require storage space and an initial download. Transcription and AI results can contain mistakes; review important notes. No Live Meeting Notes account is required.
 
 ## Suggested category and contact
@@ -35,8 +38,8 @@ Requires Android 8 or later on a supported 64-bit ARM device. Speech models requ
 - Support email: Venkatasainadh.duppalapudi@gmail.com.
 - Developer name: Oh-my-pi.
 - Privacy policy URL: publish `docs/privacy-policy.html`; after enabling GitHub Pages, verify `https://sainadh812.github.io/android-live-notes-nemotron/privacy-policy.html` opens publicly before entering it.
-- Price: Paid app; ₹100 in India.
-- Initial distribution country: India. Add other countries only after reviewing their automatically converted prices.
+- Price: Free download with optional one-time in-app support purchases.
+- Distribution: India and supported international markets selected in Console. Review localized support-product prices before activating each region.
 
 ## Release notes for the first Play test
 

@@ -702,7 +702,7 @@ private fun AiSettingsPanel(
 @Composable
 private fun PrivacySettingsPanel() {
     SettingsSection("Privacy", "How Live Meeting Notes handles your information.", NoteIcon.SETTINGS) {
-        Text("Effective September 23, 2026 · Developer: Oh-my-pi", style = MaterialTheme.typography.bodySmall, color = Muted)
+        Text("Effective September 27, 2026 · Developer: Oh-my-pi", style = MaterialTheme.typography.bodySmall, color = Muted)
         Text(
             "The microphone is used after you start a recording. Android speech recognition may send audio to your device's speech-service provider. Downloaded speech models process audio on your phone and save recordings in private app storage.",
             style = MaterialTheme.typography.bodyMedium

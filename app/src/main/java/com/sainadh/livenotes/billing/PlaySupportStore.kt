@@ -88,7 +88,7 @@ private class PlaySupportStore(application: Application) : SupportStore {
     // Console uses one buy option named "support" and no discounts/rentals/preorders.
     // Never pick an arbitrary offer whose displayed price could differ from checkout.
     private fun baseOffer(product: ProductDetails) = product.oneTimePurchaseOfferDetailsList
-        ?.singleOrNull { it.purchaseOptionId == "support" && it.offerId == null }
+        ?.singleOrNull { it.purchaseOptionId == "support" && it.offerId == null && !it.offerToken.isNullOrEmpty() }
 
     override fun purchases(callback: (Result<List<SupportPurchase>>) -> Unit) {
         client.queryPurchasesAsync(QueryPurchasesParams.newBuilder().setProductType(BillingClient.ProductType.INAPP).build()) { result, list -> deliver {
@@ -112,8 +112,9 @@ private class PlaySupportStore(application: Application) : SupportStore {
         if (activity.isFinishing || activity.isDestroyed) return Result.failure(IllegalStateException("Reopen Settings to continue."))
         val product = products[offer.productId] ?: return Result.failure(IllegalStateException("Refresh prices and try again."))
         val details = baseOffer(product) ?: return Result.failure(IllegalStateException("This support option is unavailable."))
+        val token = details.offerToken ?: return Result.failure(IllegalStateException("Refresh prices and try again."))
         val item = BillingFlowParams.ProductDetailsParams.newBuilder().setProductDetails(product)
-            .setOfferToken(details.offerToken).build()
+            .setOfferToken(token).build()
         return outcome(client.launchBillingFlow(activity, BillingFlowParams.newBuilder().setProductDetailsParamsList(listOf(item)).build()))
     }
 

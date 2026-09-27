@@ -1,21 +1,21 @@
 # Google Play setup for Live Meeting Notes
 
-Prepared September 23, 2026. This folder prepares the first Android release. No Play Console account changes, uploads, or public publication have been performed from this workspace.
+Updated September 27, 2026 for free download and optional support purchases. This folder prepares the first Android release. No Play Console account changes, uploads, or public publication have been performed from this workspace.
 
-The prepared upload kit is `build/LiveMeetingNotes-google-play-kit.zip`. It contains `LiveMeetingNotes-1.1.1-play.aab`, store graphics, the listing, this guide, the privacy policy, and the Data safety worksheet. **Upload the `.aab` inside it, not the ZIP.** Private signing keys and passwords are not included. A separate copy of the AAB is also in this folder's `build/` directory.
+Version 1.2.0 (code 7) adds optional Google Play support purchases. Build it with the **Android Play build** GitHub Actions workflow described in [BILLING-SETUP.md](BILLING-SETUP.md). The older local 1.1.1 ZIP/AAB does not contain billing and must not be used for this update.
 
 ## First step in Play Console
 
 1. Open [Google Play Console](https://play.google.com/console/), then **Home → Create app**. If you already created the app entry, open that entry instead.
-2. Enter **Live Meeting Notes**, default language **English (United States)**, **App**, **Paid**, and support email **Venkatasainadh.duppalapudi@gmail.com**. Review Google's declarations and Play App Signing terms, then create the app.
+2. Enter **Live Meeting Notes**, default language **English (United States)**, **App**, **Free**, and support email **Venkatasainadh.duppalapudi@gmail.com**. Review Google's declarations and Play App Signing terms, then create the app.
 3. Open the app's Dashboard to follow **Set up your app**. Use `STORE-LISTING.md` for the descriptions.
 
-The public developer name is **Oh-my-pi**. Configure the paid app at **₹100 for India** under **Products → App pricing**. A paid app requires a Google payments profile. Google can calculate local prices for other selected countries; review them before adding those countries. A paid app can later become free, but an app that has been offered free cannot become paid again under the same package name. External AI API charges are separate from the app's download price. See [create an app](https://support.google.com/googleplay/android-developer/answer/9859152?hl=en) and [pricing](https://support.google.com/googleplay/android-developer/answer/6334373?hl=en).
+The public developer name is **Oh-my-pi**. Set **Products → App pricing → Free**. Optional in-app purchases still require a merchant payments profile. Enable international distribution and configure the four products' regional prices separately using [BILLING-SETUP.md](BILLING-SETUP.md). A paid app can become free; once offered free it cannot become paid again under the same package. External AI provider charges are separate. See [pricing](https://support.google.com/googleplay/android-developer/answer/6334373?hl=en).
 
 ## App bundle and signing
 
 - Production application ID: `com.sainadh.livenotes`.
-- Android version: `1.1.1`; version code: `6`.
+- Android version: `1.2.0`; version code: `7`.
 - Minimum Android: 8/API 26; target: Android 16/API 36.
 - Supported native architecture: `arm64-v8a`.
 - Build output to upload: `app/build/outputs/bundle/release/app-release.aab`.
@@ -29,13 +29,9 @@ The upload key and a private copy of its configuration are stored outside the re
 
 **Back up that private directory securely before relying on this machine for future releases.** Keep the private keystore and passwords out of Git, the store listing, and public file shares. The root `signing.properties` is ignored by Git; `signing.properties.example` is safe to track. The public upload certificate can be shared when Play requests it. No app API credentials are embedded in the release.
 
-Build again with JDK 17, Android platform 36, build tools 35.0.0, and the configured private signing file:
+Use GitHub Actions for builds. Configure the existing upload key as the four repository secrets listed in [BILLING-SETUP.md](BILLING-SETUP.md), then manually run **Android Play build** with `signed_release` checked. The workflow runs tests/lint and publishes the signed AAB as the `live-notes-play-bundle` artifact. Never create a replacement upload key just to make CI pass.
 
-```sh
-./gradlew :app:testDebugUnitTest :app:lintRelease :app:bundleRelease :app:assembleRelease --no-daemon --console=plain
-```
-
-Release builds reject preview and emulator-test flags. Increase `versionCode` for subsequent Play uploads; if code 6 has already been uploaded to this Play entry, increase it before uploading again. Do not upload a Preview/debug APK. A development build with the same package and a different signing key will not accept an in-place release update; export any needed data before changing installations. A Play-signed installation also differs from a directly installed upload-key-signed APK.
+Release builds reject preview and emulator-test flags. Increase `versionCode` for subsequent Play uploads; if code 7 has already been uploaded to this Play entry, increase it before uploading again. Do not upload a Preview/debug APK. A development build with the same package and a different signing key will not accept an in-place release update; export any needed data before changing installations. A Play-signed installation also differs from a directly installed upload-key-signed APK.
 
 ## First upload: internal testing
 
@@ -62,7 +58,7 @@ See [review preparation](https://support.google.com/googleplay/android-developer
 
 ## Personal account testing gate
 
-This is a personal developer account. If it was created after November 13, 2023, it needs a closed test with at least **12 testers opted in continuously for 14 days**, followed by an application for production access. Internal testing does not satisfy this gate, and completing the period does not automatically approve production access. Because this is a paid app, internal testers can install it free, while closed-test participants must purchase it. Check the requirement shown on the Console dashboard. See [Google's testing requirements](https://support.google.com/googleplay/android-developer/answer/14151465?hl=en) and [testing-track pricing](https://support.google.com/googleplay/android-developer/answer/9845334?hl=en-GB).
+This is a personal developer account. If it was created after November 13, 2023, it needs a closed test with at least **12 testers opted in continuously for 14 days**, followed by an application for production access. Internal testing does not satisfy this gate, and completing the period does not automatically approve production access. The app download is free in every test track. Add billing testers separately under License testing so their support purchases use test payment methods. Check the requirement shown on the Console dashboard. See [Google's testing requirements](https://support.google.com/googleplay/android-developer/answer/14151465?hl=en) and [testing-track pricing](https://support.google.com/googleplay/android-developer/answer/9845334?hl=en-GB).
 
 ## Validation and remaining limits
 
