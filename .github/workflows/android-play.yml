@@ -34,10 +34,46 @@ jobs:
           export ANDROID_HOME="${ANDROID_HOME:-/usr/local/lib/android/sdk}"
           echo "ANDROID_HOME=$ANDROID_HOME" >> "$GITHUB_ENV"
           "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" 'platforms;android-36' 'build-tools;35.0.0'
-      - name: Check and build production-package debug APK
+      - name: Restore original Preview signing key
+        env:
+          PREVIEW_KEYSTORE: ${{ secrets.ANDROID_PREVIEW_KEYSTORE_BASE64 }}
+        run: |
+          python3 - <<'PY'
+          import base64, os
+          from pathlib import Path
+          value = os.environ.get('PREVIEW_KEYSTORE')
+          if not value:
+              raise SystemExit('Configure ANDROID_PREVIEW_KEYSTORE_BASE64 with the original Preview key. A new key would prevent updates to installed apps.')
+          key = Path.home() / '.android' / 'debug.keystore'
+          key.parent.mkdir(parents=True, exist_ok=True)
+          key.write_bytes(base64.b64decode(value, validate=True))
+          key.chmod(0o600)
+          PY
+          keytool -exportcert -keystore "$HOME/.android/debug.keystore" -storepass android -alias androiddebugkey -file "$RUNNER_TEMP/preview-cert.der"
+          echo "f7313f98e9414c166f3fb2d2a9329ba1bb5dd9d76b068254522d20d1f8b109f9  $RUNNER_TEMP/preview-cert.der" | sha256sum --check
+      - name: Check and build phone Preview APK
         run: |
           python3 scripts/check-native-page-alignment.py
-          ./gradlew :app:testDebugUnitTest :app:lintDebug :app:assembleDebug --no-daemon --console=plain
+          ./gradlew :app:testDebugUnitTest :app:lintDebug :app:assembleDebug -PpreviewBuild=true --no-daemon --console=plain
+      - name: Verify Preview update identity
+        run: |
+          python3 - <<'PY'
+          import os, subprocess
+          from pathlib import Path
+          tools = Path(os.environ['ANDROID_HOME']) / 'build-tools' / '35.0.0'
+          apk = 'app/build/outputs/apk/debug/app-debug.apk'
+          cert = subprocess.check_output([str(tools / 'apksigner'), 'verify', '--print-certs', apk], text=True)
+          if 'Signer #1 certificate SHA-256 digest: f7313f98e9414c166f3fb2d2a9329ba1bb5dd9d76b068254522d20d1f8b109f9' not in cert:
+              raise SystemExit('Preview signing certificate changed; refusing to distribute an incompatible update.')
+          manifest = subprocess.check_output([str(tools / 'aapt2'), 'dump', 'badging', apk], text=True)
+          if "package: name='com.sainadh.livenotes.preview'" not in manifest:
+              raise SystemExit('Phone Preview APK must use its separate package.')
+          subprocess.run([str(tools / 'zipalign'), '-c', '-P', '16', '4', apk], check=True)
+          Path('phone-apk').mkdir()
+          import shutil
+          shutil.copy2(apk, 'phone-apk/LiveMeetingNotes-1.2.0-preview.apk')
+          print('Verified original Preview certificate, separate package and 16 KB APK alignment.')
+          PY
       - name: Configure existing Play upload key
         if: inputs.signed_release == true
         env:
@@ -68,8 +104,8 @@ jobs:
         run: ./gradlew :app:lintRelease :app:bundleRelease --no-daemon --console=plain
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
-          name: live-notes-development-apk
-          path: app/build/outputs/apk/debug/app-debug.apk
+          name: live-notes-preview-apk
+          path: phone-apk/LiveMeetingNotes-1.2.0-preview.apk
           if-no-files-found: error
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         if: inputs.signed_release == true
@@ -90,4 +126,6 @@ jobs:
           from pathlib import Path
           Path('signing.properties').unlink(missing_ok=True)
           (Path(os.environ['RUNNER_TEMP']) / 'play-upload.jks').unlink(missing_ok=True)
+          (Path.home() / '.android' / 'debug.keystore').unlink(missing_ok=True)
+          (Path(os.environ['RUNNER_TEMP']) / 'preview-cert.der').unlink(missing_ok=True)
           PY

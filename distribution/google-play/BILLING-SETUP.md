@@ -16,13 +16,15 @@ In the Live Meeting Notes app entry set **Products → App pricing → Free**. T
 
 Open the repository's Actions tab and select **Android Play build**. Run it on the branch containing this change.
 
-- Normal runs execute unit tests, lint, native alignment checks and build a development APK with the real production package. The `live-notes-development-apk` artifact is **not** a Play upload. It may conflict with an installed differently signed production app. Export needed data before changing installations.
+- Normal runs execute unit tests, lint and alignment checks, then build `LiveMeetingNotes-1.2.0-preview.apk` in the `live-notes-preview-apk` artifact. Its package is `com.sainadh.livenotes.preview`, separate from the original app. It updates the published 1.0.1–1.1.0 Preview builds when their certificate matches; original-app data stays in the original app and is not automatically copied into Preview.
+- Phone builds require `ANDROID_PREVIEW_KEYSTORE_BASE64`, containing the original development keystore. CI checks its public SHA-256 fingerprint (`f7313f98e9414c166f3fb2d2a9329ba1bb5dd9d76b068254522d20d1f8b109f9`) and refuses to distribute a new random signing identity. This is a development key, separate from the Play upload key. Preview is not a Play upload and does not use the production billing products.
+- If Android reports a signing conflict, do not uninstall or clear storage. Confirm the installed package and certificate; updates require the same signing identity. The earlier `live-notes-development-apk` artifact from run 36320100099 used a temporary CI key and is superseded for phone trials.
 - For a signed AAB, configure these repository Actions secrets using the **existing** upload key, then run manually with `signed_release` checked:
   - `PLAY_UPLOAD_KEYSTORE_BASE64`: base64 contents of the existing upload keystore.
   - `PLAY_UPLOAD_STORE_PASSWORD`: its store password.
   - `PLAY_UPLOAD_KEY_ALIAS`: its key alias.
   - `PLAY_UPLOAD_KEY_PASSWORD`: its key password.
-- The existing key's private location is documented in the release README. Do not paste key material into a chat, commit it, replace it, or include it in artifacts. No secrets have been configured by this change.
+- The existing key's private location is documented in the release README. Do not paste key material into a chat, commit it, replace it, or include it in artifacts. The original Preview development key is configured as an Actions secret. The four Play upload-key secrets remain owner setup.
 - Download `live-notes-play-bundle`, extract `app-release.aab`, and upload that file to **Internal testing**. The workflow does not upload or publish to Play.
 - Upload a bundle containing the billing permission before product setup if Console requests it. The old 1.1.1 bundle does not contain this feature. Use a higher version code if 7 has already been uploaded.
 
@@ -71,7 +73,7 @@ The app consumes completed purchases through Google Play on the client and recov
 
 There is no developer backend or real-time developer notification receiver. If a payment completes while the app is closed, the user needs to reopen the app for completion acknowledgement; Google's acknowledgement deadline still applies. Server verification/acknowledgement would provide stronger fraud and offline recovery protections if this evolves into paid entitlements. This implementation grants no paid recording features or transferable balance.
 
-GitHub unit/UI checks use controlled purchase responses. Live product activation, merchant verification, signed-bundle secrets, real Play country/checkout tests and public release remain owner setup steps. Update Data safety and publish the revised privacy policy before release.
+GitHub unit/UI checks use controlled purchase responses. Live product activation, merchant verification, Play upload-key secrets, real Play country/checkout tests and public release remain owner setup steps. Update Data safety and publish the revised privacy policy before release.
 
 ## Official references
 
