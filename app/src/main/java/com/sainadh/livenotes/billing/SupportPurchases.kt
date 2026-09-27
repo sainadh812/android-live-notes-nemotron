@@ -56,7 +56,7 @@ class SupportPurchases(private val store: SupportStore) {
 
     fun refresh() {
         if (closed || state.value.loading) return
-        update { copy(loading = true) }
+        update { copy(loading = true, message = null, thanked = false) }
         store.connect { connection ->
             if (!closed) connection.fold({
                 var offersDone = false
@@ -81,6 +81,9 @@ class SupportPurchases(private val store: SupportStore) {
                         // A checkout callback received since this query wins over its older snapshot.
                         if (revision == purchaseRevision) {
                             update { copy(checkingOut = false, pendingProducts = emptySet()) }
+                            // A previous consume may have reached Play even if its response was lost.
+                            // An empty fresh ownership query must allow future support purchases.
+                            if (inFlight.isEmpty()) update { copy(unconfirmedProducts = emptySet()) }
                             process(purchases)
                         }
                     }, ::error)

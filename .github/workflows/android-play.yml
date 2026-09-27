@@ -30,7 +30,10 @@ jobs:
           java-version: '17'
           cache: gradle
       - name: Install Android platform
-        run: sdkmanager 'platforms;android-36' 'build-tools;35.0.0'
+        run: |
+          export ANDROID_HOME="${ANDROID_HOME:-/usr/local/lib/android/sdk}"
+          echo "ANDROID_HOME=$ANDROID_HOME" >> "$GITHUB_ENV"
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" 'platforms;android-36' 'build-tools;35.0.0'
       - name: Check and build production-package debug APK
         run: |
           python3 scripts/check-native-page-alignment.py
