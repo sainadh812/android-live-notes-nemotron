@@ -42,15 +42,21 @@ Audio is checkpointed while capturing and finalized before it appears as playabl
 
 See [recorder implementation and validation](RECORDER_PLAYBACK.md) for supported behavior and test coverage.
 
+## Optional support purchases
+
+The Android app is free. Settings includes four repeatable Google Play support purchases with US reference prices of $2, $4, $7, and $10. Prices come from Google Play in the customer’s currency, including INR for an Indian Play account. Products must be configured and activated before checkout works. See [billing setup and GitHub builds](distribution/google-play/BILLING-SETUP.md). Arbitrary typed amounts are not supported by Play Billing.
+
 ## Build and test
 
-Install JDK 17 and the Android SDK with platform 35, build tools 34.0.0, and NDK 27.2.12479018. Set `ANDROID_HOME` to your SDK directory, or put `sdk.dir=/path/to/android-sdk` in the ignored `local.properties` file.
+For Google Play upload instructions, store listing text, privacy drafts, and release signing, see [the Google Play setup guide](distribution/google-play/README.md).
+
+Install JDK 17 and the Android SDK with platform 36, build tools 35.0.0, and NDK 27.2.12479018. Set `ANDROID_HOME` to your SDK directory, or put `sdk.dir=/path/to/android-sdk` in the ignored `local.properties` file.
 
 ```sh
 ./gradlew :app:testDebugUnitTest :app:lintDebug :app:assembleDebug
 ```
 
-The debug APK is `app/build/outputs/apk/debug/app-debug.apk`. The current app version is 1.1.0 (version code 5). Windows users can invoke the same tasks with `gradlew.bat`.
+The debug APK is `app/build/outputs/apk/debug/app-debug.apk`. The current Android app version is 1.2.0 (version code 7). Windows users can invoke the same tasks with `gradlew.bat`.
 
 For a phone trial alongside an older installation, build with `-PpreviewBuild=true`:
 
@@ -58,7 +64,7 @@ For a phone trial alongside an older installation, build with `-PpreviewBuild=tr
 ./gradlew :app:assembleDebug -PpreviewBuild=true
 ```
 
-This produces **LiveMeetingNotes Preview** with package `com.sainadh.livenotes.preview`, separate notes/settings/models, and version 1.1.0-preview. The Preview APK uses this workspace’s existing debug signing key and is intended to update the previous Preview installation, preserving its notes and models. Android requires the installed package to have the same signing certificate. The original non-Preview app remains a separate installation.
+This produces **LiveMeetingNotes Preview** with package `com.sainadh.livenotes.preview`, separate notes/settings/models, and version 1.2.0-preview. The Preview APK uses this workspace’s existing debug signing key and is intended to update the previous Preview installation, preserving its notes and models. Android requires the installed package to have the same signing certificate. The original non-Preview app remains a separate installation.
 
 Network-specific Gradle proxy settings belong in your personal `~/.gradle/gradle.properties`; the repository does not force a corporate proxy.
 

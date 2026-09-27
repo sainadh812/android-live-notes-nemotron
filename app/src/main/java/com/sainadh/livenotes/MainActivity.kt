@@ -131,6 +131,7 @@ private val ErrorInk = Color(0xFF983B32)
 private val ErrorPaper = Color(0xFFFFEEE8)
 
 class MainActivity : ComponentActivity() {
+    private val supportViewModel by viewModels<com.sainadh.livenotes.billing.SupportViewModel>()
     companion object {
         const val EXTRA_AUTO_TEST_OPENAI = "extra_auto_test_openai"
     }
@@ -147,11 +148,16 @@ class MainActivity : ComponentActivity() {
         )
         val activityLifecycle = lifecycle
         setContent {
-            LiveNotesTheme { LiveNotesScreen(viewModel, activityLifecycle) }
+            LiveNotesTheme { LiveNotesScreen(viewModel, activityLifecycle, supportViewModel) }
         }
         if (intent.getBooleanExtra(EXTRA_AUTO_TEST_OPENAI, false)) {
             viewModel.testConnection(viewModel.currentProvider(), viewModel.currentModel(), "")
         }
+    }
+
+    override fun onResume() {
+        super.onResume()
+        supportViewModel.purchases.refresh()
     }
 
     override fun onStop() {
@@ -194,7 +200,8 @@ private enum class AppScreen(val title: String, val icon: NoteIcon) {
 }
 
 @Composable
-private fun LiveNotesScreen(viewModel: MainViewModel, activityLifecycle: Lifecycle) {
+private fun LiveNotesScreen(viewModel: MainViewModel, activityLifecycle: Lifecycle, supportViewModel: com.sainadh.livenotes.billing.SupportViewModel) {
+    val supportState by supportViewModel.purchases.state.collectAsStateWithLifecycle(lifecycle = activityLifecycle)
     val context = LocalContext.current
     var screen by rememberSaveable { mutableStateOf(AppScreen.RECORD) }
     val recordScroll = rememberLazyListState()
@@ -556,6 +563,14 @@ private fun LiveNotesScreen(viewModel: MainViewModel, activityLifecycle: Lifecyc
                             onTestConnection = { viewModel.testConnection(selectedProvider, selectedModel, apiKey) }
                         )
                     }
+                    item {
+                        com.sainadh.livenotes.ui.SupportCard(
+                            state = supportState,
+                            onBuy = { id -> supportViewModel.buy(context as android.app.Activity, id) },
+                            onRefresh = supportViewModel.purchases::refresh,
+                        )
+                    }
+                    item { PrivacySettingsPanel() }
                     item { Text("Live Notes  ·  ${BuildConfig.VERSION_NAME}", modifier = Modifier.fillMaxWidth(), style = MaterialTheme.typography.bodySmall, color = Muted) }
                 }
             }
@@ -681,6 +696,31 @@ private fun AiSettingsPanel(
             modifier = Modifier.fillMaxWidth().heightIn(min = 52.dp), shape = RoundedCornerShape(16.dp)
         ) { Text("Test connection") }
         Text(connectionStatus, style = MaterialTheme.typography.bodySmall, color = Muted)
+    }
+}
+
+@Composable
+private fun PrivacySettingsPanel() {
+    SettingsSection("Privacy", "How Live Meeting Notes handles your information.", NoteIcon.SETTINGS) {
+        Text("Effective September 27, 2026 · Developer: Oh-my-pi", style = MaterialTheme.typography.bodySmall, color = Muted)
+        Text(
+            "The microphone is used after you start a recording. Android speech recognition may send audio to your device's speech-service provider. Downloaded speech models process audio on your phone and save recordings in private app storage.",
+            style = MaterialTheme.typography.bodyMedium
+        )
+        Text(
+            "AI summaries are optional. After you save a provider API key, transcript updates, previous summaries, context, identifiers, and the key are sent to the selected OpenAI, DeepSeek, or Qwen service. Saved audio is not sent to those summary services.",
+            style = MaterialTheme.typography.bodyMedium
+        )
+        Text(
+            "Transcripts, summaries, action items, and settings stay in app storage. Android backup may include the notes database and speech settings; audio, downloaded models, and encrypted API-key preferences are excluded. The app contains no ads, analytics, or Live Meeting Notes account system.",
+            style = MaterialTheme.typography.bodyMedium
+        )
+        Text(
+            "This version does not provide individual note deletion. Android's Clear storage control removes local app data. It does not remove exported copies, Android backups, or information already handled by external providers.",
+            style = MaterialTheme.typography.bodyMedium
+        )
+        Text("Optional support purchases use Google Play. The app receives purchase status and tokens, but never your card or bank details.", style = MaterialTheme.typography.bodySmall)
+        Text("Privacy questions: Venkatasainadh.duppalapudi@gmail.com", style = MaterialTheme.typography.bodySmall, color = Teal)
     }
 }
 

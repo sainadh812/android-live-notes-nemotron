@@ -1,5 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <full-backup-content>
     <include domain="sharedpref" path="." />
+    <!-- The Android Keystore key cannot be restored with these encrypted preferences. -->
+    <exclude domain="sharedpref" path="secure-settings.xml" />
     <include domain="database" path="." />
 </full-backup-content>

@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="500" viewBox="0 0 1024 500">
+  <title>Live Meeting Notes</title>
+  <desc>Capture ideas. Keep the details. Cream and teal artwork using the app's original waveform mark.</desc>
+  <rect width="1024" height="500" fill="#F6F5F0"/>
+
+  <g font-family="Liberation Sans, Arial, sans-serif" fill="#203632">
+    <text x="72" y="199" font-size="58" font-weight="700" letter-spacing="-1.5">Live Meeting</text>
+    <text x="72" y="265" font-size="58" font-weight="700" letter-spacing="-1.5">Notes</text>
+  </g>
+  <path d="M74 304v57" stroke="#17695B" stroke-width="4" stroke-linecap="round"/>
+  <g font-family="Liberation Sans, Arial, sans-serif" fill="#60716B" font-size="26">
+    <text x="92" y="325">Capture ideas.</text>
+    <text x="92" y="359">Keep the details.</text>
+  </g>
+
+  <circle cx="794" cy="250" r="181" fill="none" stroke="#D2EAD7" stroke-width="2"/>
+  <circle cx="794" cy="250" r="156" fill="#203632"/>
+  <g transform="translate(596.9 52.9) scale(3.65)">
+    <path fill="none" stroke="#D2EAD7" stroke-width="5" stroke-linecap="round"
+          d="M32 47v14M43 36v36M54 28v52M65 39v30M76 47v14"/>
+  </g>
+</svg>

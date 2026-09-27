@@ -1,0 +1,18 @@
+TITLE
+Live Meeting Notes | Android App Preview
+
+DESCRIPTION
+A first look at Live Meeting Notes, an Android app for capturing conversations and keeping the details.
+
+Follow live transcripts, revisit saved audio, review optional AI summaries and action items, and copy, share, or export your notes.
+
+This walkthrough shows the actual app interface with sample meeting content. Speech, waveform, summary, and timing data are demonstration fixtures. Optional AI summaries require your own provider API key and internet access; provider charges may apply.
+
+I'm preparing the app for Google Play. It will be free to download and use, with optional support purchases.
+
+Privacy policy: https://sainadh812.github.io/android-live-notes-nemotron/privacy-policy.html
+
+Music: original instrumental created for this preview.
+
+UPLOAD NOTES
+Upload Live-Meeting-Notes-landscape.mp4. Use YouTube-cover.jpg as the custom thumbnail if your channel has access to custom thumbnails. Set visibility to Public or Unlisted, allow embedding, and use the resulting YouTube video URL in Google Play's Preview video field. Complete YouTube's audience questions according to your intended audience. This text is a draft; nothing has been uploaded or posted on your behalf.
