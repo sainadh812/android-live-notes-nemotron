@@ -1,0 +1,9 @@
+I’ve been building Live Meeting Notes, an Android app for turning conversations into notes I can return to.
+
+Here’s a first look: live transcription, saved recordings and playback, and easy ways to copy, share, or export notes. Optional AI summaries and action items work with your own provider API key; provider charges may apply.
+
+I’m preparing it for Google Play. The app will be free, with optional purchases for anyone who wants to support development.
+
+The video uses sample meeting content. I’d love to hear what would make this useful in your day-to-day work.
+
+#AndroidDevelopment #BuildInPublic #Productivity

@@ -1,0 +1,13 @@
+Live Meeting Notes — original ambient product-demo soundtrack
+
+Created for this project using create_soundtrack.py on September 27, 2026.
+
+The complete 42-second composition and arrangement were generated specifically for this video using mathematical sine oscillators, soft envelopes, low-level harmonics, stereo panning, and oscillator-derived delay. No external recordings, samples, loops, existing songs, voices, voice clones, or stock-music libraries were used. No specific artist or existing song was requested or imitated.
+
+Source: create_soundtrack.py in the same directory.
+Output: live-meeting-notes-original-ambient.wav
+Format: 48,000 Hz, stereo, 16-bit PCM WAV; 42.0 seconds.
+Peak target: 0.27 linear, below the 0.32 project limit; no clipped samples.
+Numerical validation: soundtrack-verification.json.
+
+This is generated original project audio. No third-party music license or attribution requirement was introduced by its creation. This provenance record describes the process; it does not assert registration, exclusive copyright ownership, or Content ID clearance.
