@@ -1,6 +1,9 @@
 package com.sainadh.livenotes.ui
 
 import android.graphics.Bitmap
+import android.graphics.Point
+import androidx.core.view.ViewCompat
+import androidx.core.view.WindowInsetsCompat
 import android.os.SystemClock
 import androidx.compose.ui.graphics.asAndroidBitmap
 import androidx.compose.ui.test.captureToImage
@@ -46,15 +49,17 @@ class DemoCaptureTest {
     @get:Rule val compose = createAndroidComposeRule<MainActivity>()
     private val instrumentation get() = InstrumentationRegistry.getInstrumentation()
     private val context get() = instrumentation.targetContext
-    private val output by lazy { File(context.getExternalFilesDir(null), "demo-capture").apply { mkdirs() } }
+    private val output by lazy { File(context.filesDir, "demo-capture").apply { mkdirs() } }
     private val timeline = mutableListOf<String>()
     private var originMs = 0L
 
     private fun hold(ms: Long) { Thread.sleep(ms) }
 
     private fun scrollTo(text: String) {
-        compose.onAllNodes(hasScrollAction()).onFirst().performScrollToNode(hasText(text))
-        compose.onNodeWithText(text).performScrollTo()
+        // Production transcript paragraphs contain up to 45 words, so several
+        // sample sentences can share one Text semantics node.
+        compose.onAllNodes(hasScrollAction()).onFirst().performScrollToNode(hasText(text, substring = true))
+        compose.onNodeWithText(text, substring = true).performScrollTo()
     }
 
     private fun capture(name: String) {
@@ -108,6 +113,16 @@ class DemoCaptureTest {
             ServiceStateTracker.audioNotice.value = null
         }
         compose.waitForIdle()
+        compose.runOnIdle {
+            val bars = requireNotNull(ViewCompat.getRootWindowInsets(compose.activity.window.decorView))
+                .getInsets(WindowInsetsCompat.Type.systemBars())
+            val display = Point()
+            @Suppress("DEPRECATION")
+            compose.activity.windowManager.defaultDisplay.getRealSize(display)
+            File(output, "insets.json").writeText(
+                """{"top":${bars.top},"bottom":${bars.bottom},"left":${bars.left},"right":${bars.right},"width":${display.x},"height":${display.y}}"""
+            )
+        }
         originMs = SystemClock.elapsedRealtime()
         File(output, "capture-origin-elapsed-realtime-ms.txt").writeText(originMs.toString())
         File(output, "README.txt").writeText(
@@ -127,6 +142,7 @@ class DemoCaptureTest {
             ServiceStateTracker.audioRoute.value = "Phone microphone"
             ServiceStateTracker.recordingId.value = id
         }
+        scrollTo("Live transcript")
         sentences.forEachIndexed { segment, sentence ->
             val words = sentence.split(' ')
             for (count in words.indices) {

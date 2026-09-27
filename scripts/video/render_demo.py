@@ -53,6 +53,7 @@ class Renderer:
   # paced for the edit; no UI text, result, or button is fabricated by this script.
   self.timeline=json.loads((assets/'timeline.json').read_text())
   self.timeline.setdefault('idle',self.timeline.get('recorder'))
+  self.insets=json.loads((assets/'insets.json').read_text()) if (assets/'insets.json').exists() else None
   self.cache={}
  def screenshot(self,scene,progress):
   files=self.timeline.get(scene,self.timeline.get('idle'))
@@ -62,6 +63,11 @@ class Renderer:
   if key not in self.cache:
    p=self.assets/key
    im=Image.open(p).convert('RGB')
+   if self.insets:
+    scale=im.width/self.insets['width']
+    left=round(self.insets['left']*scale);top=round(self.insets['top']*scale)
+    right=im.width-round(self.insets['right']*scale);bottom=im.height-round(self.insets['bottom']*scale)
+    im=im.crop((left,top,right,bottom))
    maxh=900
    maxw=620 if self.format=='landscape' else 600
    im.thumbnail((maxw,maxh),Image.Resampling.LANCZOS)

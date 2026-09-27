@@ -1,0 +1,23 @@
+1
+00:00:00,000 --> 00:00:05,000
+Live Meeting Notes. Good conversations. Better notes.
+
+2
+00:00:05,000 --> 00:00:13,000
+Stay with the conversation. Follow speech as text.
+
+3
+00:00:13,000 --> 00:00:21,000
+Return to the moment. Replay saved audio. Follow the words.
+
+4
+00:00:21,000 --> 00:00:29,000
+Keep the next steps in view. Optional AI summaries and action items. Your own provider key is required; provider charges may apply.
+
+5
+00:00:29,000 --> 00:00:36,000
+Your notes. Ready to go. Copy text. Share it. Save a .txt file.
+
+6
+00:00:36,000 --> 00:00:42,000
+Listen. Capture. Remember. Live Meeting Notes — product preview. Demo uses sample meeting content.

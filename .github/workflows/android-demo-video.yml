@@ -7,9 +7,15 @@ on:
       - 'app/src/androidTest/java/com/sainadh/livenotes/ui/DemoCaptureTest.kt'
       - 'scripts/video/**'
   workflow_dispatch:
+    inputs:
+      capture_run_id:
+        description: Reuse an existing successful capture run (leave empty to capture again)
+        type: string
+        default: ''
 
 permissions:
   contents: read
+  actions: read
 
 concurrency:
   group: android-demo-${{ github.ref }}
@@ -23,12 +29,14 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
           persist-credentials: false
-      - uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3
+      - if: inputs.capture_run_id == ''
+        uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3
         with:
           distribution: temurin
           java-version: '17'
           cache: gradle
       - name: Install Android capture tools
+        if: inputs.capture_run_id == ''
         run: |
           export ANDROID_HOME="${ANDROID_HOME:-/usr/local/lib/android/sdk}"
           export PATH="$ANDROID_HOME/cmdline-tools/latest/bin:$ANDROID_HOME/platform-tools:$PATH"
@@ -42,8 +50,10 @@ jobs:
           printf 'avd.ini.encoding=UTF-8\npath=%s\ntarget=android-30\n' "$ANDROID_AVD_HOME/demo.avd" > "$ANDROID_AVD_HOME/demo.ini"
           sudo chmod a+rw /dev/kvm
       - name: Build the isolated emulator app and capture harness
+        if: inputs.capture_run_id == ''
         run: ./gradlew :app:assembleDebug :app:assembleDebugAndroidTest -PemulatorTests=true --no-daemon --console=plain
       - name: Start Android emulator
+        if: inputs.capture_run_id == ''
         run: |
           "$ANDROID_HOME/emulator/emulator" -avd demo -no-window -no-audio -no-snapshot -no-boot-anim -gpu swiftshader_indirect -accel on > emulator.log 2>&1 &
           timeout 120s adb wait-for-device
@@ -64,6 +74,7 @@ jobs:
           adb install -r app/build/outputs/apk/debug/app-debug.apk
           adb install -r app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk
       - name: Capture the actual app using synthetic sample content
+        if: inputs.capture_run_id == ''
         run: |
           mkdir -p demo-evidence
           adb shell cat /proc/uptime > demo-evidence/recording-start-uptime.txt
@@ -81,7 +92,8 @@ jobs:
           adb shell pkill -2 screenrecord || true
           wait "$recording_process" || true
           adb pull /sdcard/live-notes-demo-raw.mp4 demo-evidence/live-notes-demo-raw.mp4 || true
-          adb pull /sdcard/Android/data/com.sainadh.livenotes.emulatortest/files/demo-capture demo-evidence/
+          adb exec-out run-as com.sainadh.livenotes.emulatortest tar -C files -cf - demo-capture > demo-evidence/demo-capture.tar
+          tar -xf demo-evidence/demo-capture.tar -C demo-evidence
           test "$instrument_exit" -eq 0
           test -s demo-evidence/demo-capture/recorder.png
           test -s demo-evidence/demo-capture/live.png
@@ -93,25 +105,38 @@ jobs:
           report = Path('demo-evidence/instrumentation.txt').read_text()
           assert 'OK (1 test)' in report, report
           PY
+      - name: Reuse verified capture media
+        if: inputs.capture_run_id != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CAPTURE_RUN: ${{ inputs.capture_run_id }}
+        run: |
+          [[ "$CAPTURE_RUN" =~ ^[0-9]+$ ]]
+          test "$(gh run view "$CAPTURE_RUN" --json conclusion --jq .conclusion)" = success
+          gh run download "$CAPTURE_RUN" -n live-meeting-notes-demo-capture -D reused-capture
+          cp -R reused-capture/demo-evidence demo-evidence
       - name: Render landscape and LinkedIn demo videos
         run: |
           python3 -m venv "$RUNNER_TEMP/video-env"
           "$RUNNER_TEMP/video-env/bin/pip" install pillow==12.3.0 numpy==2.2.6 imageio-ffmpeg==0.6.0
+          "$RUNNER_TEMP/video-env/bin/python" scripts/video/prepare_motion.py --evidence demo-evidence
           "$RUNNER_TEMP/video-env/bin/python" scripts/video/create_soundtrack.py
           "$RUNNER_TEMP/video-env/bin/python" scripts/video/render_demo.py --assets demo-evidence/demo-capture --output demo-videos --soundtrack scripts/video/live-meeting-notes-original-ambient.wav
-          cp scripts/video/linkedin-post.txt scripts/video/soundtrack-provenance.txt demo-videos/
+          cp scripts/video/linkedin-post.txt scripts/video/soundtrack-provenance.txt scripts/video/README.md scripts/video/Live-Meeting-Notes.srt demo-videos/
+          cp demo-videos/landscape-scene-1.jpg demo-videos/YouTube-cover.jpg
+          cp demo-videos/linkedin-scene-1.jpg demo-videos/LinkedIn-cover.jpg
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: live-meeting-notes-videos
           path: demo-videos/
           retention-days: 90
       - name: Collect diagnostic logs
-        if: always()
+        if: always() && inputs.capture_run_id == ''
         run: |
           mkdir -p demo-evidence
           timeout 20s adb logcat -d > demo-evidence/logcat.txt || true
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
-        if: always()
+        if: always() && inputs.capture_run_id == ''
         with:
           name: live-meeting-notes-demo-capture
           path: |
