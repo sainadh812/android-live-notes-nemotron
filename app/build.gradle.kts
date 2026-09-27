@@ -31,8 +31,8 @@ android {
         applicationId = if (emulatorTests) "com.sainadh.livenotes.emulatortest" else if (previewBuild) "com.sainadh.livenotes.preview" else "com.sainadh.livenotes"
         minSdk = 26
         targetSdk = 36
-        versionCode = 6
-        versionName = if (emulatorTests) "1.1.1-emulator-test" else if (previewBuild) "1.1.1-preview" else "1.1.1"
+        versionCode = 7
+        versionName = if (emulatorTests) "1.2.0-emulator-test" else if (previewBuild) "1.2.0-preview" else "1.2.0"
         manifestPlaceholders["appLabel"] = if (previewBuild) "LiveMeetingNotes Preview" else "@string/app_name"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
@@ -167,6 +167,7 @@ tasks.named("preBuild").configure { dependsOn(verifyNativeJni) }
 dependencies {
     val composeBom = platform("androidx.compose:compose-bom:2024.06.00")
 
+    implementation("com.android.billingclient:billing:9.1.0")
     implementation(composeBom)
     androidTestImplementation(composeBom)
 

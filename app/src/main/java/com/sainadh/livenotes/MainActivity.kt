@@ -131,6 +131,7 @@ private val ErrorInk = Color(0xFF983B32)
 private val ErrorPaper = Color(0xFFFFEEE8)
 
 class MainActivity : ComponentActivity() {
+    private val supportViewModel by viewModels<com.sainadh.livenotes.billing.SupportViewModel>()
     companion object {
         const val EXTRA_AUTO_TEST_OPENAI = "extra_auto_test_openai"
     }
@@ -147,11 +148,16 @@ class MainActivity : ComponentActivity() {
         )
         val activityLifecycle = lifecycle
         setContent {
-            LiveNotesTheme { LiveNotesScreen(viewModel, activityLifecycle) }
+            LiveNotesTheme { LiveNotesScreen(viewModel, activityLifecycle, supportViewModel) }
         }
         if (intent.getBooleanExtra(EXTRA_AUTO_TEST_OPENAI, false)) {
             viewModel.testConnection(viewModel.currentProvider(), viewModel.currentModel(), "")
         }
+    }
+
+    override fun onResume() {
+        super.onResume()
+        supportViewModel.purchases.refresh()
     }
 
     override fun onStop() {
@@ -194,7 +200,8 @@ private enum class AppScreen(val title: String, val icon: NoteIcon) {
 }
 
 @Composable
-private fun LiveNotesScreen(viewModel: MainViewModel, activityLifecycle: Lifecycle) {
+private fun LiveNotesScreen(viewModel: MainViewModel, activityLifecycle: Lifecycle, supportViewModel: com.sainadh.livenotes.billing.SupportViewModel) {
+    val supportState by supportViewModel.purchases.state.collectAsStateWithLifecycle(lifecycle = activityLifecycle)
     val context = LocalContext.current
     var screen by rememberSaveable { mutableStateOf(AppScreen.RECORD) }
     val recordScroll = rememberLazyListState()
@@ -556,6 +563,13 @@ private fun LiveNotesScreen(viewModel: MainViewModel, activityLifecycle: Lifecyc
                             onTestConnection = { viewModel.testConnection(selectedProvider, selectedModel, apiKey) }
                         )
                     }
+                    item {
+                        com.sainadh.livenotes.ui.SupportCard(
+                            state = supportState,
+                            onBuy = { id -> supportViewModel.buy(context as android.app.Activity, id) },
+                            onRefresh = supportViewModel.purchases::refresh,
+                        )
+                    }
                     item { PrivacySettingsPanel() }
                     item { Text("Live Notes  ·  ${BuildConfig.VERSION_NAME}", modifier = Modifier.fillMaxWidth(), style = MaterialTheme.typography.bodySmall, color = Muted) }
                 }
@@ -705,6 +719,7 @@ private fun PrivacySettingsPanel() {
             "This version does not provide individual note deletion. Android's Clear storage control removes local app data. It does not remove exported copies, Android backups, or information already handled by external providers.",
             style = MaterialTheme.typography.bodyMedium
         )
+        Text("Optional support purchases use Google Play. The app receives purchase status and tokens, but never your card or bank details.", style = MaterialTheme.typography.bodySmall)
         Text("Privacy questions: Venkatasainadh.duppalapudi@gmail.com", style = MaterialTheme.typography.bodySmall, color = Teal)
     }
 }
