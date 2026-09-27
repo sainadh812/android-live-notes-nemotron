@@ -44,17 +44,16 @@ jobs:
           value = os.environ.get('PREVIEW_KEYSTORE')
           if not value:
               raise SystemExit('Configure ANDROID_PREVIEW_KEYSTORE_BASE64 with the original Preview key. A new key would prevent updates to installed apps.')
-          key = Path.home() / '.android' / 'debug.keystore'
-          key.parent.mkdir(parents=True, exist_ok=True)
+          key = Path(os.environ['RUNNER_TEMP']) / 'original-preview.jks'
           key.write_bytes(base64.b64decode(value, validate=True))
           key.chmod(0o600)
           PY
-          keytool -exportcert -keystore "$HOME/.android/debug.keystore" -storepass android -alias androiddebugkey -file "$RUNNER_TEMP/preview-cert.der"
+          keytool -exportcert -keystore "$RUNNER_TEMP/original-preview.jks" -storepass android -alias androiddebugkey -file "$RUNNER_TEMP/preview-cert.der"
           echo "f7313f98e9414c166f3fb2d2a9329ba1bb5dd9d76b068254522d20d1f8b109f9  $RUNNER_TEMP/preview-cert.der" | sha256sum --check
       - name: Check and build phone Preview APK
         run: |
           python3 scripts/check-native-page-alignment.py
-          ./gradlew :app:testDebugUnitTest :app:lintDebug :app:assembleDebug -PpreviewBuild=true --no-daemon --console=plain
+          ./gradlew :app:testDebugUnitTest :app:lintDebug :app:assembleDebug -PpreviewBuild=true -PdevelopmentKeystore="$RUNNER_TEMP/original-preview.jks" --no-daemon --console=plain
       - name: Verify Preview update identity
         run: |
           python3 - <<'PY'
@@ -63,6 +62,7 @@ jobs:
           tools = Path(os.environ['ANDROID_HOME']) / 'build-tools' / '35.0.0'
           apk = 'app/build/outputs/apk/debug/app-debug.apk'
           cert = subprocess.check_output([str(tools / 'apksigner'), 'verify', '--print-certs', apk], text=True)
+          print(next(line for line in cert.splitlines() if 'certificate SHA-256 digest:' in line))
           if 'Signer #1 certificate SHA-256 digest: f7313f98e9414c166f3fb2d2a9329ba1bb5dd9d76b068254522d20d1f8b109f9' not in cert:
               raise SystemExit('Preview signing certificate changed; refusing to distribute an incompatible update.')
           manifest = subprocess.check_output([str(tools / 'aapt2'), 'dump', 'badging', apk], text=True)
@@ -126,6 +126,6 @@ jobs:
           from pathlib import Path
           Path('signing.properties').unlink(missing_ok=True)
           (Path(os.environ['RUNNER_TEMP']) / 'play-upload.jks').unlink(missing_ok=True)
-          (Path.home() / '.android' / 'debug.keystore').unlink(missing_ok=True)
+          (Path(os.environ['RUNNER_TEMP']) / 'original-preview.jks').unlink(missing_ok=True)
           (Path(os.environ['RUNNER_TEMP']) / 'preview-cert.der').unlink(missing_ok=True)
           PY

@@ -62,6 +62,13 @@ android {
     if (emulatorTests) sourceSets.getByName("main").jniLibs.setSrcDirs(emptyList<String>())
 
     signingConfigs {
+        getByName("debug") {
+            // CI's Android user directory can differ from the runner home directory.
+            // Pin the original Preview key explicitly instead of letting AGP create a new one.
+            providers.gradleProperty("developmentKeystore").orNull?.let {
+                storeFile = rootProject.file(it)
+            }
+        }
         create("release") {
             storeFile = releaseSigningProperties.getProperty("storeFile")?.let { rootProject.file(it) }
             storePassword = releaseSigningProperties.getProperty("storePassword")
