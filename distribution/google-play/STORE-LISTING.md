@@ -37,7 +37,7 @@ Requires Android 8 or later on a supported 64-bit ARM device. Speech models requ
 - Category: Productivity.
 - Support email: Venkatasainadh.duppalapudi@gmail.com.
 - Developer name: Oh-my-pi.
-- Privacy policy URL: publish `docs/privacy-policy.html`; after enabling GitHub Pages, verify `https://sainadh812.github.io/android-live-notes-nemotron/privacy-policy.html` opens publicly before entering it.
+- Privacy policy URL: https://sainadh812.github.io/android-live-notes-nemotron/privacy-policy.html (public HTTPS access verified September 27, 2026).
 - Price: Free download with optional one-time in-app support purchases.
 - Distribution: India and supported international markets selected in Console. Review localized support-product prices before activating each region.
 
@@ -47,6 +47,6 @@ Live transcription, on-device speech models, audio recording and playback, and o
 
 ## Graphics
 
-Use the icon and feature graphic in `assets/`. Capture at least two real screenshots on an Android phone; suggested screens are a sample recording with transcript, the saved-recording player, and Settings. Use demonstration content with permission to share it. Do not use Windows screenshots.
+Use the icon and feature graphic in `assets/`. Two Android UI screenshots from the GitHub emulator tests are in `assets/screenshots/`: the recorder and playback screen. The playback content is demonstration data. These are actual app UI captures, not evidence of microphone or recognition performance on a physical phone. Additional phone screenshots can be added after device testing.
 
 Google's [preview asset requirements](https://support.google.com/googleplay/android-developer/answer/9866151?hl=en) specify the icon, feature graphic, and screenshots. The short description above is under 80 characters, and the app name is under 30.

@@ -1,6 +1,6 @@
 # Google Play setup for Live Meeting Notes
 
-Updated September 27, 2026 for free download and optional support purchases. This folder prepares the first Android release. No Play Console account changes, uploads, or public publication have been performed from this workspace.
+Updated September 27, 2026 for free download and optional support purchases. This folder prepares the first Android release. No Play Console upload or app publication has been performed from this workspace. The privacy policy is published on GitHub Pages.
 
 Version 1.2.0 (code 7) adds optional Google Play support purchases. Build it with the **Android Play build** GitHub Actions workflow described in [BILLING-SETUP.md](BILLING-SETUP.md). The older local 1.1.1 ZIP/AAB does not contain billing and must not be used for this update.
 
@@ -29,7 +29,7 @@ The upload key and a private copy of its configuration are stored outside the re
 
 **Back up that private directory securely before relying on this machine for future releases.** Keep the private keystore and passwords out of Git, the store listing, and public file shares. The root `signing.properties` is ignored by Git; `signing.properties.example` is safe to track. The public upload certificate can be shared when Play requests it. No app API credentials are embedded in the release.
 
-Use GitHub Actions for builds. Configure the existing upload key as the four repository secrets listed in [BILLING-SETUP.md](BILLING-SETUP.md), then manually run **Android Play build** with `signed_release` checked. The workflow runs tests/lint and publishes the signed AAB as the `live-notes-play-bundle` artifact. Never create a replacement upload key just to make CI pass.
+Use GitHub Actions for builds. The existing upload key is configured in the four repository secrets listed in [BILLING-SETUP.md](BILLING-SETUP.md). For future builds, manually run **Android Play build** with `signed_release` checked. The workflow runs tests/lint and publishes the signed AAB as the `live-notes-play-bundle` artifact. Never create a replacement upload key just to make CI pass.
 
 Release builds reject preview and emulator-test flags. Increase `versionCode` for subsequent Play uploads; if code 7 has already been uploaded to this Play entry, increase it before uploading again. Do not upload a Preview/debug APK. A development build with the same package and a different signing key will not accept an in-place release update; export any needed data before changing installations. A Play-signed installation also differs from a directly installed upload-key-signed APK.
 
@@ -45,7 +45,7 @@ Internal testing is the first device check, not a public launch. See [testing tr
 
 ## Complete before closed testing or public review
 
-- Publish `docs/privacy-policy.html` at an accessible, stable public URL and enter that URL in Play Console. A suitable URL after enabling GitHub Pages for this repository would be `https://sainadh812.github.io/android-live-notes-nemotron/privacy-policy.html`. Confirm that it opens without signing in before using it. The Android Settings screen includes the policy summary and privacy contact.
+- Privacy policy: [public policy](https://sainadh812.github.io/android-live-notes-nemotron/privacy-policy.html). HTTPS access was verified on September 27, 2026. Enter this URL in Play Console. The Android Settings screen includes the policy summary and privacy contact. GitHub Pages serves the `codex/privacy-policy-site` branch; when the source policy changes, update its `privacy-policy.html` and `index.html` there as well.
 - Complete Data safety using `DATA-SAFETY-WORKSHEET.md`. Optional third-party AI and Android speech can transmit data off the phone. Provider retention and sharing exceptions need confirmation; do not blindly select “no data collected.”
 - Upload the 512×512 icon and 1024×500 feature graphic from `assets/`, plus at least two accurate screenshots from the Android app.
 - Complete Ads (no advertising SDK found), target audience, content rating, and any other applicable Console declarations. The owner chooses the intended audience; do not guess the questionnaire responses or claim a rating before completing it.
@@ -58,7 +58,7 @@ See [review preparation](https://support.google.com/googleplay/android-developer
 
 ## Personal account testing gate
 
-This is a personal developer account. If it was created after November 13, 2023, it needs a closed test with at least **12 testers opted in continuously for 14 days**, followed by an application for production access. Internal testing does not satisfy this gate, and completing the period does not automatically approve production access. The app download is free in every test track. Add billing testers separately under License testing so their support purchases use test payment methods. Check the requirement shown on the Console dashboard. See [Google's testing requirements](https://support.google.com/googleplay/android-developer/answer/14151465?hl=en) and [testing-track pricing](https://support.google.com/googleplay/android-developer/answer/9845334?hl=en-GB).
+If your developer account is a personal account created after November 13, 2023, it needs a closed test with at least **12 testers opted in continuously for 14 days**, followed by an application for production access. Internal testing does not satisfy this gate, and completing the period does not automatically approve production access. The app download is free in every test track. Add billing testers separately under License testing so their support purchases use test payment methods. Check the requirement shown on the Console dashboard. See [Google's testing requirements](https://support.google.com/googleplay/android-developer/answer/14151465?hl=en) and [testing-track pricing](https://support.google.com/googleplay/android-developer/answer/9845334?hl=en-GB).
 
 ## Validation and remaining limits
 

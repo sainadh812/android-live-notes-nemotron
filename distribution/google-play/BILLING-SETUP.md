@@ -24,7 +24,7 @@ Open the repository's Actions tab and select **Android Play build**. Run it on t
   - `PLAY_UPLOAD_STORE_PASSWORD`: its store password.
   - `PLAY_UPLOAD_KEY_ALIAS`: its key alias.
   - `PLAY_UPLOAD_KEY_PASSWORD`: its key password.
-- The existing key's private location is documented in the release README. Do not paste key material into a chat, commit it, replace it, or include it in artifacts. The original Preview development key is configured as an Actions secret. The four Play upload-key secrets remain owner setup.
+- The existing key's private location is documented in the release README. Do not paste key material into a chat, commit it, replace it, or include it in artifacts. The original Preview development key and all four existing Play upload-key secrets are configured in GitHub Actions. No replacement signing key was generated.
 - Download `live-notes-play-bundle`, extract `app-release.aab`, and upload that file to **Internal testing**. The workflow does not upload or publish to Play.
 - Upload a bundle containing the billing permission before product setup if Console requests it. The old 1.1.1 bundle does not contain this feature. Use a higher version code if 7 has already been uploaded.
 
@@ -73,7 +73,7 @@ The app consumes completed purchases through Google Play on the client and recov
 
 There is no developer backend or real-time developer notification receiver. If a payment completes while the app is closed, the user needs to reopen the app for completion acknowledgement; Google's acknowledgement deadline still applies. Server verification/acknowledgement would provide stronger fraud and offline recovery protections if this evolves into paid entitlements. This implementation grants no paid recording features or transferable balance.
 
-GitHub unit/UI checks use controlled purchase responses. Live product activation, merchant verification, Play upload-key secrets, real Play country/checkout tests and public release remain owner setup steps. Update Data safety and publish the revised privacy policy before release.
+GitHub unit/UI checks use controlled purchase responses. Live product activation, merchant verification, real Play country/checkout tests and public release remain owner setup steps. Complete Data safety before release. The revised privacy policy is published at https://sainadh812.github.io/android-live-notes-nemotron/privacy-policy.html.
 
 ## Official references
 

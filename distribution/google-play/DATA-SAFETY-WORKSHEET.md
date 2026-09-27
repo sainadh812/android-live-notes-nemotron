@@ -11,7 +11,7 @@
 | Advertising | No advertising SDK, advertising identifier access or ad display found. |
 | Analytics / crash reporting | No developer analytics or crash-reporting endpoint. Review Google Play Billing and its transitive Google libraries for purchase-service diagnostics before submission. |
 | In-app purchases | Google Play Billing 9.1.0; optional one-time support purchases. App download is free. |
-| Privacy policy URL | **Pending:** host `PRIVACY-POLICY.md` at a public, stable URL and enter that URL. Developer: Oh-my-pi; privacy email: Venkatasainadh.duppalapudi@gmail.com. |
+| Privacy policy URL | Published at https://sainadh812.github.io/android-live-notes-nemotron/privacy-policy.html; enter that URL in Console. Developer: Oh-my-pi; privacy email: Venkatasainadh.duppalapudi@gmail.com. |
 | Privacy policy inside app | The Android Settings screen includes privacy information and the privacy contact. Add the hosted URL later if a clickable web policy is preferred. |
 | Encryption in transit | App-owned AI and download URLs use HTTPS; cleartext is disabled. **Final all-data answer pending** verification of speech-service handling and other applicable flows. |
 | Deletion requests | No implemented developer deletion-request mechanism or individual note deletion UI. Android Clear storage removes local app data. Do not claim a working server-side deletion service or equate local clearing with deleting provider/backup copies. |

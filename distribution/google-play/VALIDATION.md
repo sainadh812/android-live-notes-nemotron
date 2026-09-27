@@ -2,6 +2,22 @@
 
 GitHub Actions validation for the billing update is recorded in `BILLING-SETUP.md`. The historical 1.1.1 evidence below does not validate the new billing flow. Real Google Play checkout needs activated Console products, a billing-enabled bundle, license testers, and device tests.
 
+## Signed GitHub release — September 27, 2026
+
+Source commit: `d35bf34f3168b4b77703de5fa3398efc45cfae87`.
+
+- [Signed GitHub build](https://github.com/sainadh812/android-live-notes-nemotron/actions/runs/36324796313) succeeded. Download the [Play bundle artifact](https://github.com/sainadh812/android-live-notes-nemotron/actions/runs/36324796313/artifacts/10933204352), extract the ZIP, and upload `app-release.aab` to internal testing.
+- All 63 unit tests passed, zero failures or ignored tests. Debug/release lint reported zero errors, with 34/33 existing warnings respectively.
+- Downloaded AAB passed Google bundletool 1.18.3 validation and `jarsigner -verify`. All 727 payload entries were separately read through Java's verifying JarFile API and matched the existing upload certificate. ZIP entries are unique; CRC checks passed. The self-signed certificate and absent timestamp produce expected JAR verifier warnings.
+- Manifest: `com.sainadh.livenotes`, version 1.2.0/code 7, min API 26, target API 36, not debuggable, billing permission included.
+- Bundle configuration specifies `PAGE_ALIGNMENT_16K`. All five final arm64 native libraries passed LOAD/congruence and GNU_RELRO alignment checks.
+- AAB SHA-256: `d85367f39b946fad35f30d1d8b5cadb1680ea014f877875279d8fe9f65c2a3f0` (16,311,100 bytes).
+- Upload certificate SHA-256: `aaf89177c61acd9058e06b8027237c7935a23304d0d3148a7ddcd08f70a96410`.
+- Existing upload signing credentials are configured in GitHub Actions secrets. No replacement key was generated.
+- [Privacy policy](https://sainadh812.github.io/android-live-notes-nemotron/privacy-policy.html) is publicly hosted over HTTPS and was verified against the repository source. Two real emulator screenshots are available in `assets/screenshots/`; the playback screenshot contains sample test data.
+
+No Play Console upload, product activation, real checkout, or public release has been performed. Play account access and declarations, product setup, license-tester purchases, and physical-device validation remain required. The separate Preview package can remain installed with its existing notes.
+
 ---
 
 # Android release validation — 23 September 2026

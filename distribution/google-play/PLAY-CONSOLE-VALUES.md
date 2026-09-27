@@ -31,6 +31,8 @@ Google allows a paid app to become free. After an app has been offered free, it 
 - Feature graphic: `assets/feature-graphic.png`
 - Listing text: `STORE-LISTING.md`
 - Privacy policy source: `PRIVACY-POLICY.md`
+- Public privacy-policy URL: https://sainadh812.github.io/android-live-notes-nemotron/privacy-policy.html
 - Public privacy page source: repository `docs/privacy-policy.html`
+- Android UI screenshots: `assets/screenshots/` (from GitHub emulator tests)
 
 Upload the `.aab` file, not the artifact ZIP or development APK.
