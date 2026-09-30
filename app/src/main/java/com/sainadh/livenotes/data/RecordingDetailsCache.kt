@@ -11,6 +11,8 @@ internal class RecordingDetailsCache(
     private var source: SavedRecording? = null
     private var details: SavedRecording? = null
 
+    suspend fun clear() = mutex.withLock { source = null; details = null }
+
     suspend fun load(recording: SavedRecording): SavedRecording {
         if (recording.audioFileName == null || recording.audioStatus != RecordingAudioStatus.READY) return recording
         return mutex.withLock {

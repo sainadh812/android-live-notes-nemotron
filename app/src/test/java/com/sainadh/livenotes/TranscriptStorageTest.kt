@@ -18,6 +18,18 @@ class TranscriptStorageTest {
         override fun observeAll(): kotlinx.coroutines.flow.Flow<List<TranscriptSegmentEntity>> =
             kotlinx.coroutines.flow.flowOf(emptyList())
         val rows = mutableMapOf<Pair<String, Long>, TranscriptSegmentEntity>()
+        override suspend fun getAll() = rows.values.sortedWith(compareBy({ it.createdAtEpochMs }, { it.recordingId }, { it.segmentId }))
+        override suspend fun recordingExists(recordingId: String) = rows.values.any { it.recordingId == recordingId }
+        override suspend fun deleteRecording(recordingId: String): Int {
+            val keys = rows.keys.filter { it.first == recordingId }
+            keys.forEach(rows::remove)
+            return keys.size
+        }
+        override suspend fun insertRestored(rows: List<TranscriptSegmentEntity>) {
+            check(rows.all { (it.recordingId to it.segmentId) !in this.rows })
+            rows.forEach { this.rows[it.recordingId to it.segmentId] = it }
+        }
+
         override suspend fun get(recordingId: String, segmentId: Long) = rows[recordingId to segmentId]
         override suspend fun insert(segment: TranscriptSegmentEntity) {
             check(rows.put(segment.recordingId to segment.segmentId, segment) == null)

@@ -108,6 +108,76 @@ class NotesRepository(
     /** SQLite clears assignments while retaining every note and its user-written text. */
     suspend fun deleteNoteCategory(id: String) = categoryDao.delete(id)
 
+    /** Snapshot all tables at one database revision, rather than independently collected flows. */
+    suspend fun exportSnapshot(): LibrarySnapshot = database.withTransaction {
+        snapshotInTransaction().also { snapshot ->
+            require(snapshot.recordings.none { it.audioStatus == RecordingAudioStatus.RECORDING }) {
+                "Stop and save the current recording before creating a backup"
+            }
+        }
+    }
+
+    suspend fun planSnapshotImport(snapshot: LibrarySnapshot): LibraryImportPlan {
+        validateLibrarySnapshot(snapshot)
+        return database.withTransaction { planLibraryImport(snapshotInTransaction(), snapshot) }
+    }
+
+    suspend fun importSnapshot(snapshot: LibrarySnapshot): LibraryImportResult {
+        validateLibrarySnapshot(snapshot)
+        return database.withTransaction {
+            val plan = planLibraryImport(snapshotInTransaction(), snapshot)
+            val additions = plan.additions
+            // ABORT inserts inside this transaction ensure unexpected conflicts roll back all tables.
+            categoryDao.insertRestored(additions.categories)
+            dailyNoteDao.insertRestored(additions.dailyNotes)
+            recordingDao.insertRestored(additions.recordings)
+            transcriptChunkDao.insertRestored(additions.chunks)
+            segmentDao.insertRestored(additions.segments)
+            organizationDao.insertRestored(additions.organizations)
+            plan.result
+        }
+    }
+
+    private suspend fun snapshotInTransaction() = LibrarySnapshot(
+        dailyNotes = dailyNoteDao.getAll(), chunks = transcriptChunkDao.getAll(),
+        segments = segmentDao.getAll(), recordings = recordingDao.getAll(),
+        categories = categoryDao.getAll(), organizations = organizationDao.getAll()
+    )
+
+    suspend fun recordingAudioReferenceCount(fileName: String): Int = recordingDao.audioReferenceCount(fileName)
+
+    suspend fun getRecordingMetadata(recordingId: String): RecordingEntity? = recordingDao.get(recordingId)
+
+    suspend fun recordingExists(recordingId: String): Boolean = database.withTransaction {
+        if (recordingId.startsWith("legacy:")) {
+            val date = recordingId.removePrefix("legacy:")
+            validateBackupDate(date)
+            transcriptChunkDao.dateExists(date)
+        } else {
+            validateRecordingId(recordingId)
+            recordingDao.get(recordingId) != null || segmentDao.recordingExists(recordingId)
+        }
+    }
+
+    suspend fun deleteRecording(recordingId: String): RecordingDeletionResult = database.withTransaction {
+        if (recordingId.startsWith("legacy:")) {
+            val date = recordingId.removePrefix("legacy:")
+            validateBackupDate(date)
+            val chunks = transcriptChunkDao.deleteDate(date)
+            val annotation = organizationDao.delete(recordingNoteKey(recordingId))
+            RecordingDeletionResult(recordingId, null, chunks > 0 || annotation > 0, legacyChunksDeleted = chunks)
+        } else {
+            validateRecordingId(recordingId)
+            val recording = recordingDao.get(recordingId)
+            require(recording?.audioStatus != RecordingAudioStatus.RECORDING) { "Stop and save this recording before deleting it" }
+            val segments = segmentDao.deleteRecording(recordingId)
+            val row = recordingDao.delete(recordingId)
+            val annotation = organizationDao.delete(recordingNoteKey(recordingId))
+            RecordingDeletionResult(recordingId, recording?.audioFileName, row > 0 || segments > 0 || annotation > 0,
+                segmentsDeleted = segments)
+        }
+    }
+
     fun observeSavedRecordings(): Flow<List<SavedRecording>> = combine(
         segmentDao.observeAll(), transcriptChunkDao.observeAll(), recordingDao.observeAll()
     ) { segments, legacy, recordings -> savedRecordings(segments, legacy, recordings) }.flowOn(Dispatchers.Default)

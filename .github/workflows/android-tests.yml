@@ -1,7 +1,7 @@
 name: Android recorder checks
 on:
   push:
-    branches: [main, release/v1.1.0-recorder-playback, fix/long-meeting-performance, codex/note-organization]
+    branches: [main, release/v1.1.0-recorder-playback, fix/long-meeting-performance, codex/note-organization, codex/backup-restore-delete]
   workflow_dispatch:
 
 permissions:

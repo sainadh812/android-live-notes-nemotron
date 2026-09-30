@@ -20,8 +20,10 @@ import androidx.sqlite.db.SupportSQLiteDatabase
 import com.sainadh.livenotes.stt.TranscriptStatus
 import com.sainadh.livenotes.stt.TranscriptUpdate
 import kotlinx.coroutines.flow.Flow
+import kotlinx.serialization.Serializable
 
 @Entity(tableName = "daily_notes")
+@Serializable
 data class DailyNoteEntity(
     @PrimaryKey val dateKey: String,
     val summary: String,
@@ -31,6 +33,7 @@ data class DailyNoteEntity(
 )
 
 @Entity(tableName = "transcript_chunks")
+@Serializable
 data class TranscriptChunkEntity(
     @PrimaryKey(autoGenerate = true) val id: Long = 0,
     val dateKey: String,
@@ -42,6 +45,7 @@ data class TranscriptChunkEntity(
 
 /** New recordings use stable segment identities. The v1 table remains untouched. */
 @Entity(tableName = "transcript_segments", primaryKeys = ["recordingId", "segmentId"], indices = [Index("dateKey")])
+@Serializable
 data class TranscriptSegmentEntity(
     val recordingId: String,
     val segmentId: Long,
@@ -65,6 +69,7 @@ object RecordingAudioStatus {
 
 /** Audio-only recordings are kept even if speech recognition produces no text. */
 @Entity(tableName = "recordings", indices = [Index("dateKey")])
+@Serializable
 data class RecordingEntity(
     @PrimaryKey val recordingId: String,
     val dateKey: String,
@@ -78,6 +83,7 @@ data class RecordingEntity(
 )
 
 @Entity(tableName = "note_categories", indices = [Index(value = ["normalizedName"], unique = true)])
+@Serializable
 data class NoteCategoryEntity(
     @PrimaryKey val id: String,
     val name: String,
@@ -93,6 +99,7 @@ data class NoteCategoryEntity(
     )],
     indices = [Index("categoryId")]
 )
+@Serializable
 data class NoteOrganizationEntity(
     @PrimaryKey val noteKey: String,
     @ColumnInfo(defaultValue = "''") val title: String = "",
@@ -104,6 +111,15 @@ data class NoteOrganizationEntity(
 
 @Dao
 interface NoteOrganizationDao {
+    @Query("DELETE FROM note_organization WHERE noteKey = :noteKey")
+    suspend fun delete(noteKey: String): Int
+
+    @Query("SELECT * FROM note_organization ORDER BY noteKey")
+    suspend fun getAll(): List<NoteOrganizationEntity>
+
+    @Insert(onConflict = OnConflictStrategy.ABORT)
+    suspend fun insertRestored(rows: List<NoteOrganizationEntity>)
+
     @Query("SELECT * FROM note_organization ORDER BY noteKey")
     fun observeAll(): Flow<List<NoteOrganizationEntity>>
 
@@ -116,6 +132,12 @@ interface NoteOrganizationDao {
 
 @Dao
 interface NoteCategoryDao {
+    @Query("SELECT * FROM note_categories ORDER BY normalizedName, id")
+    suspend fun getAll(): List<NoteCategoryEntity>
+
+    @Insert(onConflict = OnConflictStrategy.ABORT)
+    suspend fun insertRestored(rows: List<NoteCategoryEntity>)
+
     @Query("SELECT * FROM note_categories ORDER BY normalizedName, id")
     fun observeAll(): Flow<List<NoteCategoryEntity>>
 
@@ -137,6 +159,17 @@ interface NoteCategoryDao {
 
 @Dao
 interface RecordingDao {
+    @Query("SELECT COUNT(*) FROM recordings WHERE audioFileName = :fileName")
+    suspend fun audioReferenceCount(fileName: String): Int
+    @Query("DELETE FROM recordings WHERE recordingId = :recordingId")
+    suspend fun delete(recordingId: String): Int
+
+    @Query("SELECT * FROM recordings ORDER BY startedAtEpochMs DESC, recordingId ASC")
+    suspend fun getAll(): List<RecordingEntity>
+
+    @Insert(onConflict = OnConflictStrategy.ABORT)
+    suspend fun insertRestored(rows: List<RecordingEntity>)
+
     @Query("SELECT * FROM recordings ORDER BY startedAtEpochMs DESC, recordingId ASC")
     fun observeAll(): Flow<List<RecordingEntity>>
 
@@ -162,6 +195,17 @@ interface RecordingDao {
 
 @Dao
 interface TranscriptSegmentDao {
+    @Query("SELECT EXISTS(SELECT 1 FROM transcript_segments WHERE recordingId = :recordingId)")
+    suspend fun recordingExists(recordingId: String): Boolean
+    @Query("DELETE FROM transcript_segments WHERE recordingId = :recordingId")
+    suspend fun deleteRecording(recordingId: String): Int
+
+    @Query("SELECT * FROM transcript_segments ORDER BY createdAtEpochMs ASC, recordingId ASC, segmentId ASC")
+    suspend fun getAll(): List<TranscriptSegmentEntity>
+
+    @Insert(onConflict = OnConflictStrategy.ABORT)
+    suspend fun insertRestored(rows: List<TranscriptSegmentEntity>)
+
     @Query("SELECT * FROM transcript_segments ORDER BY createdAtEpochMs ASC, recordingId ASC, segmentId ASC")
     fun observeAll(): Flow<List<TranscriptSegmentEntity>>
 
@@ -218,6 +262,12 @@ interface TranscriptSegmentDao {
 @Dao
 interface DailyNoteDao {
     @Query("SELECT * FROM daily_notes ORDER BY dateKey DESC")
+    suspend fun getAll(): List<DailyNoteEntity>
+
+    @Insert(onConflict = OnConflictStrategy.ABORT)
+    suspend fun insertRestored(rows: List<DailyNoteEntity>)
+
+    @Query("SELECT * FROM daily_notes ORDER BY dateKey DESC")
     fun observeAll(): Flow<List<DailyNoteEntity>>
 
     @Query("SELECT * FROM daily_notes WHERE dateKey = :dateKey")
@@ -232,6 +282,17 @@ interface DailyNoteDao {
 
 @Dao
 interface TranscriptChunkDao {
+    @Query("SELECT EXISTS(SELECT 1 FROM transcript_chunks WHERE dateKey = :dateKey)")
+    suspend fun dateExists(dateKey: String): Boolean
+    @Query("DELETE FROM transcript_chunks WHERE dateKey = :dateKey")
+    suspend fun deleteDate(dateKey: String): Int
+
+    @Query("SELECT * FROM transcript_chunks ORDER BY createdAtEpochMs ASC, id ASC")
+    suspend fun getAll(): List<TranscriptChunkEntity>
+
+    @Insert(onConflict = OnConflictStrategy.ABORT)
+    suspend fun insertRestored(rows: List<TranscriptChunkEntity>)
+
     @Query("SELECT * FROM transcript_chunks ORDER BY createdAtEpochMs ASC, id ASC")
     fun observeAll(): Flow<List<TranscriptChunkEntity>>
 

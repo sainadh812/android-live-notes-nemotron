@@ -17,6 +17,7 @@ import com.sainadh.livenotes.data.NoteOrganization
 import com.sainadh.livenotes.data.recordingNoteKey
 import com.sainadh.livenotes.data.NotesRepository
 import com.sainadh.livenotes.data.RecordingDetailsCache
+import com.sainadh.livenotes.data.AppDataMaintenance
 import com.sainadh.livenotes.service.ForegroundListeningService
 import com.sainadh.livenotes.service.ServiceStateTracker
 import com.sainadh.livenotes.stt.ModelDownloadManager
@@ -55,13 +56,16 @@ class MainViewModel(
                 if (phase != CapturePhase.IDLE) recordingPlayer.pause()
             }
         }
+        viewModelScope.launch {
+            AppDataMaintenance.busy.collect { busy -> if (busy) recordingPlayer.close() }
+        }
     }
 
     fun playRecording(recording: SavedRecording, positionMs: Long = 0L) {
-        if (ServiceStateTracker.capturePhase.value == CapturePhase.IDLE) recordingPlayer.play(recording, positionMs)
+        if (!AppDataMaintenance.busy.value && ServiceStateTracker.capturePhase.value == CapturePhase.IDLE) recordingPlayer.play(recording, positionMs)
     }
     fun togglePlayback() {
-        if (ServiceStateTracker.capturePhase.value != CapturePhase.IDLE) return
+        if (AppDataMaintenance.busy.value || ServiceStateTracker.capturePhase.value != CapturePhase.IDLE) return
         val state = playback.value
         val retry = savedRecordings.value.firstOrNull { it.recordingId == state.recordingId }
         if (state.error != null && retry != null) recordingPlayer.play(retry, state.positionMs)
@@ -70,6 +74,8 @@ class MainViewModel(
     fun seekPlayback(positionMs: Long) = recordingPlayer.seek(positionMs)
     fun setPlaybackSpeed(speed: Float) = recordingPlayer.setSpeed(speed)
     fun pausePlayback() = recordingPlayer.pause()
+    fun closePlayback() = recordingPlayer.close()
+    suspend fun invalidateRecordingDetails() = recordingDetails.clear()
     override fun onCleared() {
         recordingPlayer.close()
         super.onCleared()
@@ -127,7 +133,10 @@ class MainViewModel(
     suspend fun deleteNoteCategory(id: String): Result<Unit> = noteOperation { repository.deleteNoteCategory(id) }
 
     private suspend fun <T> noteOperation(action: suspend () -> T): Result<T> = withContext(Dispatchers.IO) {
-        try { Result.success(action()) }
+        try {
+            check(!AppDataMaintenance.busy.value) { "Wait for the backup, restore or deletion to finish." }
+            Result.success(action())
+        }
         catch (cancel: CancellationException) { throw cancel }
         catch (error: Exception) { Result.failure(error) }
     }
@@ -174,12 +183,17 @@ class MainViewModel(
     val modelDownloadTarget = modelDownloadManager.downloadTarget
 
     fun selectSpeechModel(model: SpeechModel?) {
+        if (AppDataMaintenance.busy.value) return
         if (model == null || modelDownloadManager.isDownloaded(model)) speechSettingsStore.selectModel(model)
     }
 
-    fun selectSpeechLanguage(language: SpeechLanguage) = speechSettingsStore.selectLanguage(language)
+    fun selectSpeechLanguage(language: SpeechLanguage) {
+        if (!AppDataMaintenance.busy.value) speechSettingsStore.selectLanguage(language)
+    }
 
-    fun saveAudioInputMode(mode: AudioInputMode) = apiKeyStore.saveAudioInputMode(mode)
+    fun saveAudioInputMode(mode: AudioInputMode) {
+        if (!AppDataMaintenance.busy.value) apiKeyStore.saveAudioInputMode(mode)
+    }
 
     fun saveSettings(
         provider: LlmProvider,
@@ -188,6 +202,7 @@ class MainViewModel(
         audioInputMode: AudioInputMode
     ) {
         viewModelScope.launch {
+            if (AppDataMaintenance.busy.value) return@launch
             apiKeyStore.saveProvider(provider)
             apiKeyStore.saveModel(model.ifBlank { provider.defaultModel })
             apiKeyStore.saveAudioInputMode(audioInputMode)
@@ -250,6 +265,10 @@ class MainViewModel(
     }
 
     fun startListening() {
+        if (AppDataMaintenance.busy.value) {
+            ServiceStateTracker.lastTranscriptionError.value = "Finish the backup, restore or deletion before recording."
+            return
+        }
         recordingPlayer.pause()
         ForegroundListeningService.start(getApplication())
     }
@@ -257,16 +276,18 @@ class MainViewModel(
     fun stopListening() = ForegroundListeningService.stop(getApplication())
 
     fun retrySummary() {
+        if (AppDataMaintenance.busy.value) return
         val app = getApplication<LiveNotesApplication>()
         app.appContainer.conversationOrchestrator.retrySummary()
     }
 
     fun downloadModel(model: SpeechModel) {
+        if (AppDataMaintenance.busy.value) return
         viewModelScope.launch(Dispatchers.IO) { modelDownloadManager.download(model) }
     }
 
     fun deleteModel(model: SpeechModel) {
-        if (ServiceStateTracker.capturePhase.value != CapturePhase.IDLE) return
+        if (AppDataMaintenance.busy.value || ServiceStateTracker.capturePhase.value != CapturePhase.IDLE) return
         viewModelScope.launch {
             kotlinx.coroutines.withContext(Dispatchers.IO) { modelDownloadManager.delete(model) }
             // Keep the explicit selection even when its file was removed. A new

@@ -6,6 +6,7 @@ import androidx.security.crypto.MasterKey
 import com.sainadh.livenotes.BuildConfig
 import com.sainadh.livenotes.ai.LlmProvider
 import com.sainadh.livenotes.audio.AudioInputMode
+import com.sainadh.livenotes.backup.SecureSettingsSnapshot
 
 class ApiKeyStore(context: Context) {
     private val masterKey = MasterKey.Builder(context)
@@ -55,6 +56,19 @@ class ApiKeyStore(context: Context) {
     fun readAudioInputMode(): AudioInputMode {
         val raw = prefs.getString(KEY_AUDIO_INPUT_MODE, AudioInputMode.AUTO.name).orEmpty()
         return AudioInputMode.entries.firstOrNull { it.name == raw } ?: AudioInputMode.AUTO
+    }
+
+    fun exportSnapshot(): SecureSettingsSnapshot = SecureSettingsSnapshot(
+        readApiKey(), readProvider().name, readModel(), readAudioInputMode().name
+    )
+
+    /** Synchronous commit lets backup restore detect failure and roll back before importing notes. */
+    fun restoreSnapshot(snapshot: SecureSettingsSnapshot) {
+        snapshot.validate()
+        check(prefs.edit().putString(KEY_API, snapshot.apiKey).putString(KEY_PROVIDER, snapshot.provider)
+            .putString(KEY_MODEL, snapshot.model).putString(KEY_AUDIO_INPUT_MODE, snapshot.audioInputMode).commit()) {
+            "Could not save restored AI settings."
+        }
     }
 
     companion object {

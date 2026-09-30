@@ -95,7 +95,7 @@ class ForegroundListeningService : Service() {
             ACTION_STOP -> stopListeningAndSelf()
             else -> startListening()
         }
-        return if (intent?.action == ACTION_STOP) START_NOT_STICKY else START_STICKY
+        return if (intent?.action == ACTION_STOP || (phase == Phase.IDLE && com.sainadh.livenotes.data.AppDataMaintenance.busy.value)) START_NOT_STICKY else START_STICKY
     }
 
     override fun onBind(intent: Intent?): IBinder? = null
@@ -131,6 +131,11 @@ class ForegroundListeningService : Service() {
     }
 
     private fun startListening() {
+        if (phase == Phase.IDLE && com.sainadh.livenotes.data.AppDataMaintenance.busy.value) {
+            ServiceStateTracker.lastTranscriptionError.value = "Finish the backup, restore or deletion before recording."
+            stopSelfResult(lastStartId)
+            return
+        }
         when (phase) {
             Phase.PREPARING, Phase.LISTENING, Phase.DESTROYED -> return
             Phase.STOPPING, Phase.DRAINING -> {

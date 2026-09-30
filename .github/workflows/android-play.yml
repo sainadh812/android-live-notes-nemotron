@@ -1,7 +1,7 @@
 name: Android Play build
 on:
   push:
-    branches: [codex/play-support-purchases, codex/note-organization]
+    branches: [codex/play-support-purchases, codex/note-organization, codex/backup-restore-delete]
   workflow_dispatch:
     inputs:
       signed_release:
@@ -69,12 +69,12 @@ jobs:
           if "package: name='com.sainadh.livenotes.preview'" not in manifest:
               raise SystemExit('Phone Preview APK must use its separate package.')
           version_code = int(re.search(r"versionCode='([0-9]+)'", manifest).group(1))
-          if version_code <= 7:
-              raise SystemExit('Preview version code must be newer than the installed 1.2.0 Preview (7).')
+          if version_code <= 8:
+              raise SystemExit('Preview version code must be newer than the previous 1.2.1 Preview (8).')
           subprocess.run([str(tools / 'zipalign'), '-c', '-P', '16', '4', apk], check=True)
           Path('phone-apk').mkdir()
           import shutil
-          shutil.copy2(apk, 'phone-apk/LiveMeetingNotes-1.2.1-preview.apk')
+          shutil.copy2(apk, 'phone-apk/LiveMeetingNotes-1.2.2-preview.apk')
           print('Verified original Preview certificate, separate package and 16 KB APK alignment.')
           PY
       - name: Configure existing Play upload key
@@ -104,17 +104,23 @@ jobs:
           PY
       - name: Build signed Play bundle
         if: inputs.signed_release == true
-        run: ./gradlew :app:lintRelease :app:bundleRelease --no-daemon --console=plain
+        run: ./gradlew :app:lintRelease :app:bundleRelease :app:assembleRelease --no-daemon --console=plain
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: live-notes-preview-apk
-          path: phone-apk/LiveMeetingNotes-1.2.1-preview.apk
+          path: phone-apk/LiveMeetingNotes-1.2.2-preview.apk
           if-no-files-found: error
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         if: inputs.signed_release == true
         with:
           name: live-notes-play-bundle
           path: app/build/outputs/bundle/release/app-release.aab
+          if-no-files-found: error
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: inputs.signed_release == true
+        with:
+          name: live-notes-production-migration-apk
+          path: app/build/outputs/apk/release/app-release.apk
           if-no-files-found: error
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         if: always()
