@@ -6,6 +6,7 @@ import androidx.room.ColumnInfo
 import androidx.room.Index
 import androidx.room.Database
 import androidx.room.Entity
+import androidx.room.ForeignKey
 import androidx.room.Insert
 import androidx.room.OnConflictStrategy
 import androidx.room.PrimaryKey
@@ -75,6 +76,64 @@ data class RecordingEntity(
     val audioStatus: String,
     val updatedAtEpochMs: Long
 )
+
+@Entity(tableName = "note_categories", indices = [Index(value = ["normalizedName"], unique = true)])
+data class NoteCategoryEntity(
+    @PrimaryKey val id: String,
+    val name: String,
+    val normalizedName: String
+)
+
+@Entity(
+    tableName = "note_organization",
+    foreignKeys = [ForeignKey(
+        entity = NoteCategoryEntity::class,
+        parentColumns = ["id"], childColumns = ["categoryId"],
+        onDelete = ForeignKey.SET_NULL
+    )],
+    indices = [Index("categoryId")]
+)
+data class NoteOrganizationEntity(
+    @PrimaryKey val noteKey: String,
+    @ColumnInfo(defaultValue = "''") val title: String = "",
+    @ColumnInfo(defaultValue = "0") val isBookmarked: Boolean = false,
+    val categoryId: String? = null,
+    @ColumnInfo(defaultValue = "''") val userSummary: String = "",
+    @ColumnInfo(defaultValue = "0") val updatedAtEpochMs: Long = 0L
+)
+
+@Dao
+interface NoteOrganizationDao {
+    @Query("SELECT * FROM note_organization ORDER BY noteKey")
+    fun observeAll(): Flow<List<NoteOrganizationEntity>>
+
+    @Query("SELECT * FROM note_organization WHERE noteKey = :noteKey")
+    suspend fun get(noteKey: String): NoteOrganizationEntity?
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun upsert(note: NoteOrganizationEntity)
+}
+
+@Dao
+interface NoteCategoryDao {
+    @Query("SELECT * FROM note_categories ORDER BY normalizedName, id")
+    fun observeAll(): Flow<List<NoteCategoryEntity>>
+
+    @Query("SELECT * FROM note_categories WHERE id = :id")
+    suspend fun get(id: String): NoteCategoryEntity?
+
+    @Query("SELECT * FROM note_categories WHERE normalizedName = :normalizedName")
+    suspend fun getByNormalizedName(normalizedName: String): NoteCategoryEntity?
+
+    @Insert
+    suspend fun insert(category: NoteCategoryEntity)
+
+    @Query("UPDATE note_categories SET name = :name, normalizedName = :normalizedName WHERE id = :id")
+    suspend fun rename(id: String, name: String, normalizedName: String)
+
+    @Query("DELETE FROM note_categories WHERE id = :id")
+    suspend fun delete(id: String)
+}
 
 @Dao
 interface RecordingDao {
@@ -203,8 +262,9 @@ interface TranscriptChunkDao {
 }
 
 @Database(
-    entities = [DailyNoteEntity::class, TranscriptChunkEntity::class, TranscriptSegmentEntity::class, RecordingEntity::class],
-    version = 3,
+    entities = [DailyNoteEntity::class, TranscriptChunkEntity::class, TranscriptSegmentEntity::class,
+        RecordingEntity::class, NoteCategoryEntity::class, NoteOrganizationEntity::class],
+    version = 4,
     exportSchema = false
 )
 abstract class NotesDatabase : RoomDatabase() {
@@ -212,6 +272,8 @@ abstract class NotesDatabase : RoomDatabase() {
     abstract fun transcriptChunkDao(): TranscriptChunkDao
     abstract fun transcriptSegmentDao(): TranscriptSegmentDao
     abstract fun recordingDao(): RecordingDao
+    abstract fun noteOrganizationDao(): NoteOrganizationDao
+    abstract fun noteCategoryDao(): NoteCategoryDao
 
     companion object {
         val MIGRATION_1_2 = object : Migration(1, 2) {
@@ -249,12 +311,32 @@ abstract class NotesDatabase : RoomDatabase() {
             }
         }
 
+        val MIGRATION_3_4 = object : Migration(3, 4) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("""
+                    CREATE TABLE IF NOT EXISTS note_categories (
+                        id TEXT NOT NULL PRIMARY KEY, name TEXT NOT NULL, normalizedName TEXT NOT NULL
+                    )
+                """.trimIndent())
+                db.execSQL("CREATE UNIQUE INDEX IF NOT EXISTS index_note_categories_normalizedName ON note_categories (normalizedName)")
+                db.execSQL("""
+                    CREATE TABLE IF NOT EXISTS note_organization (
+                        noteKey TEXT NOT NULL PRIMARY KEY, title TEXT NOT NULL DEFAULT '',
+                        isBookmarked INTEGER NOT NULL DEFAULT 0, categoryId TEXT,
+                        userSummary TEXT NOT NULL DEFAULT '', updatedAtEpochMs INTEGER NOT NULL DEFAULT 0,
+                        FOREIGN KEY(categoryId) REFERENCES note_categories(id) ON UPDATE NO ACTION ON DELETE SET NULL
+                    )
+                """.trimIndent())
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_note_organization_categoryId ON note_organization (categoryId)")
+            }
+        }
+
         fun build(context: Context): NotesDatabase {
             return Room.databaseBuilder(
                 context,
                 NotesDatabase::class.java,
                 "live-notes.db"
-            ).addMigrations(MIGRATION_1_2, MIGRATION_2_3).build()
+            ).addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4).build()
         }
     }
 }

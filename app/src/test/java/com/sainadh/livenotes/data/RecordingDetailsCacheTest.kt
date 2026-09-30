@@ -33,6 +33,20 @@ class RecordingDetailsCacheTest {
         details.wordCues.forEach { cue -> assertEquals(cue.text, details.text.substring(cue.startChar, cue.endChar)) }
     }
 
+    @Test fun renamingAnOpenedRecordingRetainsTimingsAndShowsTheNewTitle() = runTest {
+        var reads = 0
+        val cache = RecordingDetailsCache { reads++; cues }
+        val original = recording()
+        cache.load(original)
+        val renamed = original.copy(title = "Project planning")
+        val details = cache.load(renamed)
+        assertEquals("Project planning", details.title)
+        assertEquals(cues, details.wordCues)
+        assertEquals(original.audioFileName, details.audioFileName)
+        assertEquals(1, reads)
+        assertSame(details, cache.load(renamed.copy()))
+    }
+
     @Test fun newRevisionInvalidatesCacheAndOnlyOneRecordingIsRetained() = runTest {
         var reads = 0
         val cache = RecordingDetailsCache { reads++; cues }

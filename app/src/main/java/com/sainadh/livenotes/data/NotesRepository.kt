@@ -3,6 +3,7 @@ package com.sainadh.livenotes.data
 import java.time.LocalDate
 import java.time.Instant
 import java.time.ZoneId
+import java.util.UUID
 import androidx.room.withTransaction
 import com.sainadh.livenotes.stt.TranscriptUpdate
 import kotlinx.coroutines.flow.Flow
@@ -38,11 +39,74 @@ class NotesRepository(
     private val transcriptChunkDao = database.transcriptChunkDao()
     private val segmentDao = database.transcriptSegmentDao()
     private val recordingDao = database.recordingDao()
+    private val organizationDao = database.noteOrganizationDao()
+    private val categoryDao = database.noteCategoryDao()
     fun observeToday(): Flow<DailyNote?> = dailyNoteDao.observeOne(todayKey()).map { it?.toModel(json) }
 
     fun observeAll(): Flow<List<DailyNote>> = dailyNoteDao.observeAll().map { list ->
         list.map { it.toModel(json) }
     }
+
+    fun observeNoteOrganizations(): Flow<List<NoteOrganization>> = organizationDao.observeAll().map { rows ->
+        rows.map { it.toModel() }
+    }
+
+    fun observeNoteCategories(): Flow<List<NoteCategory>> = categoryDao.observeAll().map { rows ->
+        rows.map { NoteCategory(it.id, it.name) }
+    }
+
+    suspend fun saveNoteDetails(noteKey: String, title: String, categoryId: String?, userSummary: String) {
+        validateNoteKey(noteKey)
+        val cleanTitle = cleanNoteTitle(title)
+        validateUserSummary(userSummary)
+        database.withTransaction {
+            require(categoryId == null || categoryDao.get(categoryId) != null) {
+                "This category no longer exists. Choose another category."
+            }
+            val existing = organizationDao.get(noteKey) ?: NoteOrganizationEntity(noteKey)
+            organizationDao.upsert(existing.copy(
+                title = cleanTitle, categoryId = categoryId, userSummary = userSummary,
+                updatedAtEpochMs = System.currentTimeMillis()
+            ))
+        }
+    }
+
+    suspend fun setNoteBookmarked(noteKey: String, bookmarked: Boolean) {
+        validateNoteKey(noteKey)
+        database.withTransaction {
+            val existing = organizationDao.get(noteKey) ?: NoteOrganizationEntity(noteKey)
+            organizationDao.upsert(existing.copy(
+                isBookmarked = bookmarked, updatedAtEpochMs = System.currentTimeMillis()
+            ))
+        }
+    }
+
+    suspend fun createNoteCategory(name: String): NoteCategory {
+        val cleanName = cleanCategoryName(name)
+        val normalizedName = normalizedCategoryName(cleanName)
+        return database.withTransaction {
+            require(categoryDao.getByNormalizedName(normalizedName) == null) {
+                "A category with this name already exists"
+            }
+            val category = NoteCategory(UUID.randomUUID().toString(), cleanName)
+            categoryDao.insert(NoteCategoryEntity(category.id, category.name, normalizedName))
+            category
+        }
+    }
+
+    suspend fun renameNoteCategory(id: String, name: String) {
+        val cleanName = cleanCategoryName(name)
+        val normalizedName = normalizedCategoryName(cleanName)
+        database.withTransaction {
+            require(categoryDao.get(id) != null) { "This category no longer exists" }
+            val duplicate = categoryDao.getByNormalizedName(normalizedName)
+            require(duplicate == null || duplicate.id == id) { "A category with this name already exists" }
+            categoryDao.rename(id, cleanName, normalizedName)
+        }
+    }
+
+    /** SQLite clears assignments while retaining every note and its user-written text. */
+    suspend fun deleteNoteCategory(id: String) = categoryDao.delete(id)
 
     fun observeSavedRecordings(): Flow<List<SavedRecording>> = combine(
         segmentDao.observeAll(), transcriptChunkDao.observeAll(), recordingDao.observeAll()
@@ -135,6 +199,15 @@ private fun TranscriptChunkEntity.toModel(): TranscriptChunk = TranscriptChunk(
     text = text,
     isFinal = isFinal,
     createdAtEpochMs = createdAtEpochMs
+)
+
+private fun NoteOrganizationEntity.toModel(): NoteOrganization = NoteOrganization(
+    noteKey = noteKey,
+    title = title,
+    isBookmarked = isBookmarked,
+    categoryId = categoryId,
+    userSummary = userSummary,
+    updatedAtEpochMs = updatedAtEpochMs
 )
 
 private fun DailyNoteEntity.toModel(json: Json): DailyNote = DailyNote(

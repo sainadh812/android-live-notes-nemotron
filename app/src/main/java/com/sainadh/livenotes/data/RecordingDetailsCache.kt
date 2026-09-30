@@ -15,6 +15,11 @@ internal class RecordingDetailsCache(
         if (recording.audioFileName == null || recording.audioStatus != RecordingAudioStatus.READY) return recording
         return mutex.withLock {
             if (source == recording) return@withLock checkNotNull(details)
+            // A display-name edit cannot invalidate audio timing data or return the old title.
+            if (source?.copy(title = recording.title) == recording) {
+                source = recording
+                return@withLock checkNotNull(details).copy(title = recording.title).also { details = it }
+            }
             val loaded = recording.copy(nativeWordCues = loadWordCues(recording))
             source = recording
             details = loaded

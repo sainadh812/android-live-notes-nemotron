@@ -98,6 +98,9 @@ import com.sainadh.livenotes.ai.LlmProvider
 import com.sainadh.livenotes.audio.AudioInputMode
 import com.sainadh.livenotes.data.DailyNote
 import com.sainadh.livenotes.data.SavedRecording
+import com.sainadh.livenotes.data.NoteOrganization
+import com.sainadh.livenotes.data.dailyNoteKey
+import com.sainadh.livenotes.data.recordingNoteKey
 import com.sainadh.livenotes.sharing.RecordingSharing
 import com.sainadh.livenotes.ui.RecorderHero
 import com.sainadh.livenotes.ui.LiveTranscriptPanel
@@ -106,6 +109,15 @@ import com.sainadh.livenotes.ui.RecordingDetailScreen
 import com.sainadh.livenotes.ui.TextActions
 import com.sainadh.livenotes.ui.TranscriptSnapshotScreen
 import com.sainadh.livenotes.ui.recordingTime
+import com.sainadh.livenotes.ui.NoteEditorState
+import com.sainadh.livenotes.ui.NoteEditDialog
+import com.sainadh.livenotes.ui.ManageCategoriesDialog
+import com.sainadh.livenotes.ui.NotesFilters
+import com.sainadh.livenotes.ui.NoteOrganizationActions
+import com.sainadh.livenotes.ui.NoteCategoryBadge
+import com.sainadh.livenotes.ui.UserSummary
+import com.sainadh.livenotes.ui.matchesNoteFilters
+import com.sainadh.livenotes.ui.organizedNoteText
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -210,6 +222,37 @@ private fun LiveNotesScreen(viewModel: MainViewModel, activityLifecycle: Lifecyc
     val todayNote by viewModel.todayNote.collectAsStateWithLifecycle(lifecycle = activityLifecycle)
     val allNotes by viewModel.allNotes.collectAsStateWithLifecycle(lifecycle = activityLifecycle)
     val savedRecordings by viewModel.savedRecordings.collectAsStateWithLifecycle(lifecycle = activityLifecycle)
+    val noteOrganizationSnapshot by viewModel.noteOrganizations.collectAsStateWithLifecycle(lifecycle = activityLifecycle)
+    val noteOrganizations = noteOrganizationSnapshot.orEmpty()
+    val noteCategorySnapshot by viewModel.noteCategories.collectAsStateWithLifecycle(lifecycle = activityLifecycle)
+    val noteCategories = noteCategorySnapshot.orEmpty()
+    val organizationReady = noteOrganizationSnapshot != null && noteCategorySnapshot != null
+    val noteMessage by viewModel.noteMessage.collectAsStateWithLifecycle(lifecycle = activityLifecycle)
+    val editor = androidx.lifecycle.viewmodel.compose.viewModel<NoteEditorState>()
+    var manageCategories by rememberSaveable { mutableStateOf(false) }
+    var noteQuery by rememberSaveable { mutableStateOf("") }
+    var bookmarkedOnly by rememberSaveable { mutableStateOf(false) }
+    var categoryFilter by rememberSaveable { mutableStateOf<String?>(null) }
+    val categoryNames = remember(noteCategories) { noteCategories.associate { it.id to it.name } }
+    LaunchedEffect(noteMessage) {
+        noteMessage?.let { Toast.makeText(context, it, Toast.LENGTH_LONG).show(); viewModel.clearNoteMessage() }
+    }
+    LaunchedEffect(noteCategorySnapshot, categoryFilter) {
+        if (noteCategorySnapshot != null && !categoryFilter.isNullOrEmpty() && categoryFilter !in categoryNames) categoryFilter = null
+    }
+    val filteredRecordings = remember(savedRecordings, noteOrganizations, categoryNames, noteQuery, bookmarkedOnly, categoryFilter) {
+        savedRecordings.filter { recording ->
+            val organization = noteOrganizations[recordingNoteKey(recording.recordingId)]
+            matchesNoteFilters(recording.title, recording.text, organization, categoryNames[organization?.categoryId], noteQuery, bookmarkedOnly, categoryFilter)
+        }
+    }
+    val filteredNotes = remember(allNotes, noteOrganizations, categoryNames, noteQuery, bookmarkedOnly, categoryFilter) {
+        allNotes.filter { note ->
+            val organization = noteOrganizations[dailyNoteKey(note.dateKey)]
+            matchesNoteFilters(organization?.title?.ifBlank { friendlyDate(note.dateKey) } ?: friendlyDate(note.dateKey),
+                noteText(note), organization, categoryNames[organization?.categoryId], noteQuery, bookmarkedOnly, categoryFilter)
+        }
+    }
     val playback by viewModel.playback.collectAsStateWithLifecycle(lifecycle = activityLifecycle)
     val durationMs by ServiceStateTracker.durationMs.collectAsStateWithLifecycle(lifecycle = activityLifecycle)
     val audioLevel by ServiceStateTracker.audioLevel.collectAsStateWithLifecycle(lifecycle = activityLifecycle)
@@ -316,6 +359,9 @@ private fun LiveNotesScreen(viewModel: MainViewModel, activityLifecycle: Lifecyc
     }
     // Never reuse the previous recording's words while an asynchronous detail load completes.
     val openedRecording = recordingDetails?.takeIf { it.recordingId == recordingEntry?.recordingId } ?: recordingEntry
+    NoteEditDialog(editor, noteCategories, viewModel::saveNoteDetails, viewModel::createNoteCategory)
+    if (manageCategories) ManageCategoriesDialog(noteCategories, { manageCategories = false },
+        viewModel::createNoteCategory, viewModel::renameNoteCategory, viewModel::deleteNoteCategory)
     val fullTranscript = openedTranscript
     if (fullTranscript != null) {
         BackHandler { openedTranscript = null; transcriptSource = null }
@@ -336,6 +382,10 @@ private fun LiveNotesScreen(viewModel: MainViewModel, activityLifecycle: Lifecyc
         return
     }
     if (openedRecording != null) {
+        val noteKey = recordingNoteKey(openedRecording.recordingId)
+        val organization = noteOrganizations[noteKey]
+        val categoryName = categoryNames[organization?.categoryId]
+        fun recordingNoteText() = organizedNoteText(openedRecording.title, categoryName, organization?.userSummary.orEmpty(), "Transcript", openedRecording.text)
         BackHandler { openedRecordingId = null }
         Box(Modifier.fillMaxSize().background(Paper).safeDrawingPadding(), contentAlignment = Alignment.TopCenter) {
             Box(Modifier.widthIn(max = 840.dp).fillMaxSize()) {
@@ -357,7 +407,14 @@ private fun LiveNotesScreen(viewModel: MainViewModel, activityLifecycle: Lifecyc
                     onCopy = { RecordingSharing.copyText(context, openedRecording.text, "Transcript") },
                     onShare = { RecordingSharing.shareText(context, openedRecording.text, openedRecording.title) },
                     onShareAudio = { RecordingSharing.shareAudio(context, openedRecording) },
-                    onExport = { export(openedRecording.text, "transcript-${openedRecording.dateKey}.txt") }
+                    onExport = { export(openedRecording.text, "transcript-${openedRecording.dateKey}.txt") },
+                    organization = organization,
+                    categoryName = categoryName,
+                    onBookmark = { if (organizationReady) viewModel.bookmarkNote(noteKey, organization?.isBookmarked != true) },
+                    onEdit = { if (organizationReady) editor.open(noteKey, openedRecording.title, organization) },
+                    onShareNote = { RecordingSharing.shareText(context, recordingNoteText(), openedRecording.title) },
+                    onExportNote = { export(recordingNoteText(), "note-${openedRecording.dateKey}.txt") },
+                    organizationReady = organizationReady
                 )
             }
         }
@@ -475,7 +532,11 @@ private fun LiveNotesScreen(viewModel: MainViewModel, activityLifecycle: Lifecyc
                     }
                 }
                 AppScreen.NOTES -> {
-                    item { PageHeading("Your library", "Replay the conversation. Rediscover the details.") }
+                    item { PageHeading("Your library", "Name, organize and find what matters.") }
+                    item {
+                        NotesFilters(noteQuery, { noteQuery = it.take(200) }, bookmarkedOnly, { bookmarkedOnly = it },
+                            categoryFilter, { categoryFilter = it }, noteCategories, { manageCategories = true })
+                    }
                     if (capturePhase != CapturePhase.IDLE) {
                         item {
                             AttentionCard("Recording in progress", "Your new recording will appear here after saving. Follow the newest words on the Record screen.",
@@ -494,9 +555,20 @@ private fun LiveNotesScreen(viewModel: MainViewModel, activityLifecycle: Lifecyc
                             )
                         }
                     } else {
-                        if (savedRecordings.isNotEmpty()) {
-                            item { Text("Recordings · ${savedRecordings.size}", style = MaterialTheme.typography.titleLarge) }
-                            items(savedRecordings, key = { "recording:${it.recordingId}" }) { recording ->
+                        if (filteredRecordings.isEmpty() && filteredNotes.isEmpty()) {
+                            item {
+                                NoteSurface {
+                                    Text("No matching notes", style = MaterialTheme.typography.titleMedium)
+                                    Text("Try another search or change your filters.", color = Muted)
+                                    TextButton(onClick = { noteQuery = ""; bookmarkedOnly = false; categoryFilter = null }, modifier = Modifier.heightIn(min = 48.dp)) { Text("Clear filters") }
+                                }
+                            }
+                        }
+                        if (filteredRecordings.isNotEmpty()) {
+                            item { Text("Recordings · ${filteredRecordings.size}", style = MaterialTheme.typography.titleLarge) }
+                            items(filteredRecordings, key = { "recording:${it.recordingId}" }) { recording ->
+                                val noteKey = recordingNoteKey(recording.recordingId)
+                                val organization = noteOrganizations[noteKey]
                                 RecordingLibraryCard(recording,
                                     isPlaying = playback.recordingId == recording.recordingId && playback.isPlaying,
                                     playbackEnabled = capturePhase == CapturePhase.IDLE,
@@ -505,13 +577,24 @@ private fun LiveNotesScreen(viewModel: MainViewModel, activityLifecycle: Lifecyc
                                         openedRecordingId = recording.recordingId
                                         if (playback.recordingId == recording.recordingId) viewModel.togglePlayback()
                                         else viewModel.playRecording(recording)
-                                    })
+                                    },
+                                    organization = organization, categoryName = categoryNames[organization?.categoryId],
+                                    onBookmark = { if (organizationReady) viewModel.bookmarkNote(noteKey, organization?.isBookmarked != true) },
+                                    onEdit = { if (organizationReady) editor.open(noteKey, recording.title, organization) },
+                                    organizationReady = organizationReady)
                             }
                         }
-                        if (allNotes.isNotEmpty()) {
+                        if (filteredNotes.isNotEmpty()) {
                             item { Text("Daily summaries", style = MaterialTheme.typography.titleLarge) }
                         }
-                        items(allNotes, key = { "note:${it.dateKey}" }) { note -> HistoryCard(note, onExport = { text -> export(text, "notes-${note.dateKey}.txt") }) }
+                        items(filteredNotes, key = { "note:${it.dateKey}" }) { note ->
+                            val noteKey = dailyNoteKey(note.dateKey)
+                            val organization = noteOrganizations[noteKey]
+                            HistoryCard(note, organization, categoryNames[organization?.categoryId], organizationReady,
+                                onBookmark = { if (organizationReady) viewModel.bookmarkNote(noteKey, organization?.isBookmarked != true) },
+                                onEdit = { if (organizationReady) editor.open(noteKey, friendlyDate(note.dateKey), organization) },
+                                onExport = { text -> export(text, "notes-${note.dateKey}.txt") })
+                        }
                     }
                 }
                 AppScreen.SETTINGS -> {
@@ -788,14 +871,24 @@ private fun noteText(note: DailyNote): String = buildString {
 }
 
 @Composable
-private fun HistoryCard(note: DailyNote, onExport: (String) -> Unit) {
+private fun HistoryCard(
+    note: DailyNote, organization: NoteOrganization?, categoryName: String?, organizationReady: Boolean,
+    onBookmark: () -> Unit, onEdit: () -> Unit, onExport: (String) -> Unit
+) {
     val context = LocalContext.current
     var expanded by rememberSaveable(note.dateKey) { mutableStateOf(false) }
     NoteSurface {
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
-            Text(friendlyDate(note.dateKey), style = MaterialTheme.typography.titleMedium)
+            Column(Modifier.weight(1f)) {
+                Text(organization?.title?.ifBlank { friendlyDate(note.dateKey) } ?: friendlyDate(note.dateKey), style = MaterialTheme.typography.titleMedium)
+                if (!organization?.title.isNullOrBlank()) Text(friendlyDate(note.dateKey), style = MaterialTheme.typography.bodySmall, color = Muted)
+            }
             if (note.actionItems.isNotEmpty()) Badge("${note.actionItems.size} ${if (note.actionItems.size == 1) "TASK" else "TASKS"}")
         }
+        NoteCategoryBadge(categoryName)
+        NoteOrganizationActions(organization?.isBookmarked == true, onBookmark, onEdit, organizationReady)
+        UserSummary(organization?.userSummary.orEmpty(), expanded)
+        Text("Automatic summary", style = MaterialTheme.typography.labelMedium, color = Muted)
         SelectionContainer {
             Text(
                 note.summary.ifBlank { "No summary yet." },
@@ -809,10 +902,11 @@ private fun HistoryCard(note: DailyNote, onExport: (String) -> Unit) {
             Text("Next steps", style = MaterialTheme.typography.titleMedium)
             note.actionItems.forEach { ActionItem(it) }
         }
-        val shareableText = noteText(note)
+        val title = organization?.title?.ifBlank { friendlyDate(note.dateKey) } ?: friendlyDate(note.dateKey)
+        val shareableText = organizedNoteText(title, categoryName, organization?.userSummary.orEmpty(), "Automatic summary", noteText(note))
         TextActions(shareableText,
             onCopy = { RecordingSharing.copyText(context, shareableText, "Meeting notes") },
-            onShare = { RecordingSharing.shareText(context, shareableText, "Notes · ${note.dateKey}") },
+            onShare = { RecordingSharing.shareText(context, shareableText, title) },
             onExport = { onExport(shareableText) })
         TextButton(onClick = { expanded = !expanded }, modifier = Modifier.heightIn(min = 48.dp)) {
             Text(if (expanded) "Show less" else "Read note")

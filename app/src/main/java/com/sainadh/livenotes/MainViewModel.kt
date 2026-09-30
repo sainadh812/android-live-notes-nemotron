@@ -12,6 +12,9 @@ import com.sainadh.livenotes.audio.RecordingPlayer
 import com.sainadh.livenotes.data.SavedRecording
 import com.sainadh.livenotes.data.ApiKeyStore
 import com.sainadh.livenotes.data.DailyNote
+import com.sainadh.livenotes.data.NoteCategory
+import com.sainadh.livenotes.data.NoteOrganization
+import com.sainadh.livenotes.data.recordingNoteKey
 import com.sainadh.livenotes.data.NotesRepository
 import com.sainadh.livenotes.data.RecordingDetailsCache
 import com.sainadh.livenotes.service.ForegroundListeningService
@@ -21,6 +24,7 @@ import com.sainadh.livenotes.stt.ModelDownloadState
 import com.sainadh.livenotes.stt.SpeechModel
 import com.sainadh.livenotes.stt.SpeechLanguage
 import com.sainadh.livenotes.service.CapturePhase
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -28,6 +32,8 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.flowOn
 import com.sainadh.livenotes.data.alignedWordCues
 import com.sainadh.livenotes.audio.recordingAudioFile
 import com.sainadh.livenotes.stt.NativeWordTimingFile
@@ -80,13 +86,51 @@ class MainViewModel(
         initialValue = null
     )
 
-    val savedRecordings = repository.observeSavedRecordings(
-        ServiceStateTracker.capturePhase.map { it != CapturePhase.IDLE }
-    ).stateIn(
+    val noteOrganizations: StateFlow<Map<String, NoteOrganization>?> = repository.observeNoteOrganizations()
+        .map { entries -> entries.associateBy { it.noteKey } }
+        .flowOn(Dispatchers.Default)
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
+
+    val noteCategories: StateFlow<List<NoteCategory>?> = repository.observeNoteCategories()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
+
+    private val _noteMessage = MutableStateFlow<String?>(null)
+    val noteMessage: StateFlow<String?> = _noteMessage.asStateFlow()
+    fun clearNoteMessage() { _noteMessage.value = null }
+
+    val savedRecordings = combine(
+        repository.observeSavedRecordings(ServiceStateTracker.capturePhase.map { it != CapturePhase.IDLE }),
+        noteOrganizations
+    ) { recordings, organization ->
+        recordings.map { recording ->
+            val title = organization?.get(recordingNoteKey(recording.recordingId))?.title.orEmpty()
+            if (title.isBlank() || title == recording.title) recording else recording.copy(title = title)
+        }
+    }.flowOn(Dispatchers.Default).stateIn(
         scope = viewModelScope,
         started = SharingStarted.WhileSubscribed(5_000),
         initialValue = emptyList()
     )
+
+    suspend fun saveNoteDetails(noteKey: String, title: String, categoryId: String?, userSummary: String): Result<Unit> =
+        noteOperation { repository.saveNoteDetails(noteKey, title, categoryId, userSummary) }
+
+    fun bookmarkNote(noteKey: String, bookmarked: Boolean) {
+        viewModelScope.launch {
+            noteOperation { repository.setNoteBookmarked(noteKey, bookmarked) }
+                .onFailure { _noteMessage.value = it.message ?: "Could not update bookmark. Please try again." }
+        }
+    }
+
+    suspend fun createNoteCategory(name: String): Result<NoteCategory> = noteOperation { repository.createNoteCategory(name) }
+    suspend fun renameNoteCategory(id: String, name: String): Result<Unit> = noteOperation { repository.renameNoteCategory(id, name) }
+    suspend fun deleteNoteCategory(id: String): Result<Unit> = noteOperation { repository.deleteNoteCategory(id) }
+
+    private suspend fun <T> noteOperation(action: suspend () -> T): Result<T> = withContext(Dispatchers.IO) {
+        try { Result.success(action()) }
+        catch (cancel: CancellationException) { throw cancel }
+        catch (error: Exception) { Result.failure(error) }
+    }
 
     private val recordingDetails = RecordingDetailsCache { recording ->
         runCatching {
