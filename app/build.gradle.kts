@@ -31,8 +31,8 @@ android {
         applicationId = if (emulatorTests) "com.sainadh.livenotes.emulatortest" else if (previewBuild) "com.sainadh.livenotes.preview" else "com.sainadh.livenotes"
         minSdk = 26
         targetSdk = 36
-        versionCode = 7
-        versionName = if (emulatorTests) "1.2.0-emulator-test" else if (previewBuild) "1.2.0-preview" else "1.2.0"
+        versionCode = 8
+        versionName = if (emulatorTests) "1.2.1-emulator-test" else if (previewBuild) "1.2.1-preview" else "1.2.1"
         manifestPlaceholders["appLabel"] = if (previewBuild) "LiveMeetingNotes Preview" else "@string/app_name"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"

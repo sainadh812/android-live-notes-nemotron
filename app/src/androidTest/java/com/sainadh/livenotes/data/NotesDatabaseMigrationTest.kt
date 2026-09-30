@@ -12,12 +12,16 @@ import org.junit.Assert.*
 import org.junit.Test
 import org.junit.runner.RunWith
 
-/** Opening with Room after upgrade validates the complete generated v3 schema as well as data. */
+/** Opening with Room after upgrade validates the complete generated v4 schema as well as data. */
 @RunWith(AndroidJUnit4::class)
 class NotesDatabaseMigrationTest {
     private val context get() = InstrumentationRegistry.getInstrumentation().targetContext
 
-    private fun withMigratedDatabase(fromVersion: Int, test: (NotesDatabase) -> Unit) {
+    private fun withMigratedDatabase(
+        fromVersion: Int,
+        afterReopen: ((NotesDatabase) -> Unit)? = null,
+        test: (NotesDatabase) -> Unit
+    ) {
         val name = "recording-migration-v$fromVersion-${System.nanoTime()}.db"
         try {
             FrameworkSQLiteOpenHelperFactory().create(
@@ -44,10 +48,29 @@ class NotesDatabaseMigrationTest {
                                         dateKey TEXT NOT NULL, text TEXT NOT NULL, status TEXT NOT NULL,
                                         appendToPrevious INTEGER NOT NULL, createdAtEpochMs INTEGER NOT NULL,
                                         updatedAtEpochMs INTEGER NOT NULL, revision INTEGER NOT NULL,
-                                        summarizedRevision INTEGER NOT NULL, PRIMARY KEY(recordingId,segmentId))
+                                        summarizedRevision INTEGER NOT NULL
+                                        ${if (fromVersion >= 3) ", startMs INTEGER, endMs INTEGER" else ""},
+                                        PRIMARY KEY(recordingId,segmentId))
                                 """.trimIndent())
                                 db.execSQL("CREATE INDEX index_transcript_segments_dateKey ON transcript_segments (dateKey)")
-                                db.execSQL("INSERT INTO transcript_segments VALUES ('old-session',0,'2026-09-01','Preserved segment','FINAL',0,30,40,2,1)")
+                                db.execSQL("""
+                                    INSERT INTO transcript_segments
+                                        (recordingId,segmentId,dateKey,text,status,appendToPrevious,
+                                            createdAtEpochMs,updatedAtEpochMs,revision,summarizedRevision)
+                                    VALUES ('old-session',0,'2026-09-01','Preserved segment','FINAL',0,30,40,2,1)
+                                """.trimIndent())
+                            }
+                            if (fromVersion >= 3) {
+                                db.execSQL("""
+                                    CREATE TABLE recordings (
+                                        recordingId TEXT NOT NULL PRIMARY KEY, dateKey TEXT NOT NULL,
+                                        title TEXT NOT NULL, startedAtEpochMs INTEGER NOT NULL,
+                                        durationMs INTEGER NOT NULL, audioFileName TEXT,
+                                        audioStatus TEXT NOT NULL, updatedAtEpochMs INTEGER NOT NULL)
+                                """.trimIndent())
+                                db.execSQL("CREATE INDEX index_recordings_dateKey ON recordings (dateKey)")
+                                db.execSQL("INSERT INTO recordings VALUES ('old-session','2026-09-01','Existing meeting title',30,54000,'meeting.wav','READY',60)")
+                                db.execSQL("UPDATE transcript_segments SET startMs = 123, endMs = 4567")
                             }
                         }
 
@@ -56,14 +79,23 @@ class NotesDatabaseMigrationTest {
             ).use { it.writableDatabase }
 
             val database = Room.databaseBuilder(context, NotesDatabase::class.java, name)
-                .addMigrations(NotesDatabase.MIGRATION_1_2, NotesDatabase.MIGRATION_2_3)
+                .addMigrations(NotesDatabase.MIGRATION_1_2, NotesDatabase.MIGRATION_2_3, NotesDatabase.MIGRATION_3_4)
                 .allowMainThreadQueries()
                 .build()
             try {
                     // This opens the database and exercises Room's generated schema validation.
-                    assertEquals(3, database.openHelper.writableDatabase.version)
+                    assertEquals(4, database.openHelper.writableDatabase.version)
                     test(database)
             } finally { database.close() }
+            if (afterReopen != null) {
+                val reopened = Room.databaseBuilder(context, NotesDatabase::class.java, name)
+                    .addMigrations(NotesDatabase.MIGRATION_1_2, NotesDatabase.MIGRATION_2_3, NotesDatabase.MIGRATION_3_4)
+                    .allowMainThreadQueries().build()
+                try {
+                    assertEquals(4, reopened.openHelper.writableDatabase.version)
+                    afterReopen(reopened)
+                } finally { reopened.close() }
+            }
         } finally {
             context.deleteDatabase(name)
         }
@@ -79,6 +111,9 @@ class NotesDatabaseMigrationTest {
             assertEquals("Old partial\nOld final words", saved.text)
             assertNull(saved.audioFileName)
             assertTrue(saved.wordCues.isEmpty())
+            val repository = NotesRepository(database)
+            repository.saveNoteDetails(recordingNoteKey(saved.recordingId), "Archived meeting", null, "My old meeting summary")
+            assertEquals("Archived meeting", repository.observeNoteOrganizations().first().single().title)
         }
     }
 
@@ -107,5 +142,50 @@ class NotesDatabaseMigrationTest {
             repository.beginRecording("audio-only", 9_000)
             assertEquals(RecordingAudioStatus.READY, database.recordingDao().get("audio-only")!!.audioStatus)
         }
+    }
+
+    @Test fun v3UpgradeAndReopenPreserveRecordingsAndUserAnnotations() = withMigratedDatabase(
+        3,
+        afterReopen = { database ->
+            runBlocking {
+                assertPreviousV3Data(database)
+                val repository = NotesRepository(database)
+                val category = repository.observeNoteCategories().first().single()
+                assertEquals("Research", category.name)
+                val organization = repository.observeNoteOrganizations().first().single()
+                assertEquals(recordingNoteKey("old-session"), organization.noteKey)
+                assertEquals("Review meeting", organization.title)
+                assertTrue(organization.isBookmarked)
+                assertEquals(category.id, organization.categoryId)
+                assertEquals("Summary pasted by the user.\n\nNext steps stay here.", organization.userSummary)
+            }
+        }
+    ) { database ->
+        runBlocking {
+            assertPreviousV3Data(database)
+            val repository = NotesRepository(database)
+            assertTrue(repository.observeNoteOrganizations().first().isEmpty())
+            assertTrue(repository.observeNoteCategories().first().isEmpty())
+            val category = repository.createNoteCategory("Research")
+            repository.setNoteBookmarked(recordingNoteKey("old-session"), true)
+            repository.saveNoteDetails(recordingNoteKey("old-session"), "Review meeting", category.id,
+                "Summary pasted by the user.\n\nNext steps stay here.")
+        }
+    }
+
+    private suspend fun assertPreviousV3Data(database: NotesDatabase) {
+        assertEquals(DailyNoteEntity("2026-09-01", "Old summary", "Context", "[]", 100),
+            database.dailyNoteDao().getOne("2026-09-01"))
+        assertEquals(listOf("Old partial", "Old final words"),
+            database.transcriptChunkDao().observeAll().first().map { it.text })
+        assertEquals(RecordingEntity("old-session", "2026-09-01", "Existing meeting title", 30,
+            54_000, "meeting.wav", RecordingAudioStatus.READY, 60), database.recordingDao().get("old-session"))
+        assertEquals(TranscriptSegmentEntity("old-session", 0, "2026-09-01", "Preserved segment",
+            "FINAL", false, 30, 40, 2, 1, 123, 4567), database.transcriptSegmentDao().get("old-session", 0))
+        val recording = NotesRepository(database).observeSavedRecordings().first().single { it.recordingId == "old-session" }
+        assertEquals("Existing meeting title", recording.title)
+        assertEquals("meeting.wav", recording.audioFileName)
+        assertEquals("Preserved segment", recording.text)
+        assertFalse(recording.wordCues.isEmpty())
     }
 }

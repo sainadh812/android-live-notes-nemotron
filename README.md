@@ -22,7 +22,7 @@ on its matching model card, then **Use model**. See the
 
 Android app in Kotlin for live speech transcription, daily notes, and AI summaries with action items. Supports Android 8+ on arm64 devices.
 
-[Download Preview 1.1.0 APK](https://github.com/sainadh812/android-live-notes-nemotron/releases/download/v1.1.0-recorder-playback/android-live-notes-nemotron-v1.1.0-preview.apk) · [Model comparison and validation](SPEECH_MODELS.md)
+[Download Preview 1.2.1 APK](https://github.com/sainadh812/android-live-notes-nemotron/releases/download/v1.2.1-preview-notes/LiveMeetingNotes-1.2.1-preview.apk) · [Model comparison and validation](SPEECH_MODELS.md)
 
 - Choose Moonshine Tiny Streaming for English short notes, Nemotron English for longer English sessions, or Nemotron 3.5 for 32 supported language locales. All downloaded models run on the CPU on your phone. See [model choices and evidence](SPEECH_MODELS.md).
 - Android speech is an explicit alternative and the initial choice on a new installation. Its provider may use network recognition; availability depends on the device. Downloads do not change your selected engine.
@@ -33,6 +33,14 @@ Android app in Kotlin for live speech transcription, daily notes, and AI summari
 - New recordings store stable transcript segments and update one tentative segment. Interrupted Android recognizer results are preserved with an explicit uncertain status before retries. Existing notes survive the database upgrade.
 
 - Record, Notes, and Settings tabs keep capture controls separate from downloads and AI setup. Model files use immutable URLs and SHA-256 verification, with validated partial-download recovery.
+
+## Organize your notes — Android 1.2.1 Preview
+
+In **Notes**, choose **Edit details** on a recording or daily note to set its name, assign a category, and write or paste text into **My summary**. Pasting a summary from Gemini or another app works without an AI key. Choose **Save** to keep it. Manual summaries stay separate from transcripts and automatic summaries, so later transcription or AI updates do not replace your text.
+
+Use **Bookmark** for important entries, **Bookmarked** to filter them, and **Manage categories** to create or rename categories. Deleting a category leaves its notes uncategorized. Search matches names, transcripts, user summaries and category names. A recording's **Share note** and **Save note .txt** include its name, category and manual summary; transcript-only actions remain available.
+
+Install **1.2.1 Preview over 1.2.0 Preview** using Android's Update action. Do not uninstall or clear app storage. The package remains `com.sainadh.livenotes.preview`, version code increases from 7 to 8, and the original Preview signing key is retained. Room migration 3→4 adds separate annotation/category tables without changing the previous notes, recordings or transcript tables. Earlier database versions also have migration paths. The production app is a separate package and is not the update target for a Preview installation.
 
 ## Recorder and playback
 
@@ -56,15 +64,15 @@ Install JDK 17 and the Android SDK with platform 36, build tools 35.0.0, and NDK
 ./gradlew :app:testDebugUnitTest :app:lintDebug :app:assembleDebug
 ```
 
-The debug APK is `app/build/outputs/apk/debug/app-debug.apk`. The current Android app version is 1.2.0 (version code 7). Windows users can invoke the same tasks with `gradlew.bat`.
+The debug APK is `app/build/outputs/apk/debug/app-debug.apk`. The current Android app version is 1.2.1 (version code 8). Windows users can invoke the same tasks with `gradlew.bat`.
 
 For a phone trial alongside an older installation, build with `-PpreviewBuild=true`:
 
 ```sh
-./gradlew :app:assembleDebug -PpreviewBuild=true
+./gradlew :app:assembleDebug -PpreviewBuild=true -PdevelopmentKeystore=/path/to/original-preview.keystore
 ```
 
-This produces **LiveMeetingNotes Preview** with package `com.sainadh.livenotes.preview`, separate notes/settings/models, and version 1.2.0-preview. The Preview APK uses this workspace’s existing debug signing key and is intended to update the previous Preview installation, preserving its notes and models. Android requires the installed package to have the same signing certificate. The original non-Preview app remains a separate installation.
+This produces **LiveMeetingNotes Preview** with package `com.sainadh.livenotes.preview`, separate notes/settings/models, and version 1.2.1-preview. The Preview APK uses this workspace’s existing debug signing key and is intended to update the previous Preview installation, preserving its notes and models. Android requires the installed package to have the same signing certificate. The original non-Preview app remains a separate installation.
 
 Network-specific Gradle proxy settings belong in your personal `~/.gradle/gradle.properties`; the repository does not force a corporate proxy.
 

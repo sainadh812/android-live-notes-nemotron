@@ -65,6 +65,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.sainadh.livenotes.audio.PlaybackState
 import com.sainadh.livenotes.data.SavedRecording
+import com.sainadh.livenotes.data.NoteOrganization
 import com.sainadh.livenotes.data.RecordingSegment
 import com.sainadh.livenotes.data.RecordingAudioStatus
 import com.sainadh.livenotes.data.WordCue
@@ -252,7 +253,11 @@ fun LiveTranscriptPanel(
 }
 
 @Composable
-fun RecordingLibraryCard(recording: SavedRecording, isPlaying: Boolean, playbackEnabled: Boolean, onOpen: () -> Unit, onPlay: () -> Unit) {
+fun RecordingLibraryCard(
+    recording: SavedRecording, isPlaying: Boolean, playbackEnabled: Boolean, onOpen: () -> Unit, onPlay: () -> Unit,
+    organization: NoteOrganization? = null, categoryName: String? = null,
+    onBookmark: (() -> Unit)? = null, onEdit: (() -> Unit)? = null, organizationReady: Boolean = true
+) {
     val recordingInProgress = recording.audioStatus == RecordingAudioStatus.RECORDING
     val hasAudio = recording.audioFileName != null && recording.audioStatus == RecordingAudioStatus.READY
     RecorderSurface {
@@ -265,6 +270,8 @@ fun RecordingLibraryCard(recording: SavedRecording, isPlaying: Boolean, playback
                 Text(recordingDate(recording) + if (recording.durationMs > 0) " · ${recordingTime(recording.durationMs)}" else "", style = MaterialTheme.typography.bodySmall, color = Gray)
             }
         }
+        NoteCategoryBadge(categoryName)
+        UserSummary(organization?.userSummary.orEmpty(), expanded = false)
         Text(recording.text.ifBlank { if (recordingInProgress) "Listening for your words…" else "No transcript available" }, maxLines = 3, overflow = TextOverflow.Ellipsis,
             style = MaterialTheme.typography.bodyMedium, color = if (recording.text.isBlank()) Gray else DeepGreen)
         if (recordingInProgress) Text("● Recording in progress", style = MaterialTheme.typography.bodySmall, color = Green)
@@ -279,6 +286,7 @@ fun RecordingLibraryCard(recording: SavedRecording, isPlaying: Boolean, playback
             }
             TextButton(onClick = onOpen, modifier = Modifier.heightIn(min = 48.dp)) { Text("Open recording") }
         }
+        if (onBookmark != null && onEdit != null) NoteOrganizationActions(organization?.isBookmarked == true, onBookmark, onEdit, organizationReady)
     }
 }
 
@@ -323,7 +331,14 @@ fun RecordingDetailScreen(
     onCopy: () -> Unit,
     onShare: () -> Unit,
     onShareAudio: () -> Unit,
-    onExport: () -> Unit
+    onExport: () -> Unit,
+    organization: NoteOrganization? = null,
+    categoryName: String? = null,
+    onBookmark: (() -> Unit)? = null,
+    onEdit: (() -> Unit)? = null,
+    onShareNote: (() -> Unit)? = null,
+    onExportNote: (() -> Unit)? = null,
+    organizationReady: Boolean = true
 ) {
     val current = playback.recordingId == recording.recordingId
     val hasAudio = recording.audioFileName != null && recording.audioStatus == RecordingAudioStatus.READY
@@ -367,12 +382,22 @@ fun RecordingDetailScreen(
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Text(recording.title, style = MaterialTheme.typography.headlineLarge)
                     Text(recordingDate(recording), style = MaterialTheme.typography.bodyMedium, color = Gray)
+                    NoteCategoryBadge(categoryName)
+                    if (onBookmark != null && onEdit != null) NoteOrganizationActions(organization?.isBookmarked == true, onBookmark, onEdit, organizationReady)
                     if (recordingInProgress) Text("● Recording in progress. Audio will be available after saving.", style = MaterialTheme.typography.bodySmall, color = Green)
                     if (recording.hasUnconfirmedWords) Text("Some words could not be confirmed. Check them against the audio.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
                 }
             }
             item {
-                Column {
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    UserSummary(organization?.userSummary.orEmpty())
+                    if (onShareNote != null && onExportNote != null) {
+                        FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            OutlinedButton(onClick = onShareNote, modifier = Modifier.heightIn(min = 48.dp)) { Text("Share note") }
+                            TextButton(onClick = onExportNote, modifier = Modifier.heightIn(min = 48.dp)) { Text("Save note .txt") }
+                        }
+                    }
+                    Text("Transcript actions", style = MaterialTheme.typography.labelMedium, color = Gray)
                     TextActions(recording.text, onCopy, onShare, onExport)
                     if (hasAudio) TextButton(onClick = onShareAudio, modifier = Modifier.heightIn(min = 48.dp)) { Text("Share audio") }
                 }
