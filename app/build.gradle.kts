@@ -31,8 +31,8 @@ android {
         applicationId = if (emulatorTests) "com.sainadh.livenotes.emulatortest" else if (previewBuild) "com.sainadh.livenotes.preview" else "com.sainadh.livenotes"
         minSdk = 26
         targetSdk = 36
-        versionCode = 8
-        versionName = if (emulatorTests) "1.2.1-emulator-test" else if (previewBuild) "1.2.1-preview" else "1.2.1"
+        versionCode = 9
+        versionName = if (emulatorTests) "1.2.2-emulator-test" else if (previewBuild) "1.2.2-preview" else "1.2.2"
         manifestPlaceholders["appLabel"] = if (previewBuild) "LiveMeetingNotes Preview" else "@string/app_name"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
@@ -51,15 +51,21 @@ android {
             if (embeddedOpenAiKey.isNotBlank()) "true" else "false"
         )
 
-        // Prebuilt transcribe.cpp / Nemotron JNI libs currently only exist
-        // for arm64-v8a (see app/src/main/jniLibs/arm64-v8a). Restrict here
-        // so the build doesn't try to package other ABIs it has no .so for.
+        // Production builds compile the complete pinned engine for every Android ABI.
+        // Preview retains its existing phone binary; instrumentation uses separate test storage.
         ndk {
-            abiFilters += if (emulatorTests) "x86_64" else "arm64-v8a"
+            abiFilters += when {
+                emulatorTests -> listOf("x86_64")
+                previewBuild -> listOf("arm64-v8a")
+                else -> listOf("arm64-v8a", "armeabi-v7a", "x86", "x86_64")
+            }
         }
     }
 
     if (emulatorTests) sourceSets.getByName("main").jniLibs.setSrcDirs(emptyList<String>())
+    else if (!previewBuild) sourceSets.getByName("main").jniLibs.setSrcDirs(
+        listOf(rootProject.file("build/native-android/jniLibs"))
+    )
 
     signingConfigs {
         getByName("debug") {
@@ -91,6 +97,7 @@ android {
         release {
             isMinifyEnabled = true
             isShrinkResources = true
+            ndk.debugSymbolLevel = "FULL"
             signingConfig = signingConfigs.getByName("release")
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
@@ -169,7 +176,26 @@ val verifyNativeJni by tasks.registering {
     }
 }
 
-tasks.named("preBuild").configure { dependsOn(verifyNativeJni) }
+if (previewBuild || emulatorTests) tasks.named("preBuild").configure { dependsOn(verifyNativeJni) }
+
+if (!previewBuild && !emulatorTests) {
+    val buildAndroidNative by tasks.registering(Exec::class) {
+        group = "build"
+        description = "Builds all four Android native ABIs from the pinned engine and JNI sources."
+        inputs.dir(layout.projectDirectory.dir("src/main/cpp"))
+        inputs.files(rootProject.file("scripts/build-native-android.sh"),
+            rootProject.file("scripts/check-native-page-alignment.py"))
+        inputs.dir(rootProject.file("scripts/native-patches"))
+        inputs.property("ndkVersion", "27.2.12479018")
+        outputs.dir(rootProject.layout.buildDirectory.dir("native-android/jniLibs"))
+        workingDir(rootProject.projectDir)
+        environment("ANDROID_NDK_HOME", android.sdkDirectory.resolve("ndk/27.2.12479018").absolutePath)
+        environment("NEMOTRON_ANDROID_BUILD_DIR", rootProject.layout.buildDirectory.dir("native-android").get().asFile.absolutePath)
+        commandLine("bash", rootProject.file("scripts/build-native-android.sh").absolutePath,
+            "arm64-v8a", "armeabi-v7a", "x86", "x86_64")
+    }
+    tasks.named("preBuild").configure { dependsOn(buildAndroidNative) }
+}
 
 dependencies {
     val composeBom = platform("androidx.compose:compose-bom:2024.06.00")

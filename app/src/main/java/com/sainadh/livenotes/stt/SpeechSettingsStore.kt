@@ -3,6 +3,7 @@ package com.sainadh.livenotes.stt
 import android.content.Context
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import com.sainadh.livenotes.backup.SpeechSettingsSnapshot
 
 /** Speech choices are separate from cloud-summary credentials. Null model means Android speech. */
 class SpeechSettingsStore(context: Context, legacyModel: SpeechModel?) {
@@ -25,6 +26,18 @@ class SpeechSettingsStore(context: Context, legacyModel: SpeechModel?) {
 
     fun selectLanguage(language: SpeechLanguage) {
         update(current.value.copy(language = validLanguage(current.value.model, language)))
+    }
+
+    fun exportSnapshot(): SpeechSettingsSnapshot = SpeechSettingsSnapshot(
+        current.value.model?.id ?: "android", current.value.language.code
+    )
+
+    fun restoreSnapshot(snapshot: SpeechSettingsSnapshot) {
+        snapshot.validate()
+        check(prefs.edit().putString("model", snapshot.modelId).putString("language", snapshot.languageCode).commit()) {
+            "Could not save restored speech settings."
+        }
+        current.value = SpeechSettings(SpeechModel.fromId(snapshot.modelId), SpeechLanguage.fromCode(snapshot.languageCode))
     }
 
     private fun update(settings: SpeechSettings) {

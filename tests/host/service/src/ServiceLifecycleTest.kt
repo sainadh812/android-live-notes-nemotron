@@ -309,5 +309,14 @@ fun main() {
         check(ServiceStateTracker.hasEarlierTranscript.value)
         check(ServiceStateTracker.latestTranscript.value.endsWith("meeting word 7199. "))
     }
+    val maintenance = checkNotNull(com.sainadh.livenotes.data.AppDataMaintenance.tryBegin { true })
+    try {
+        scenario("backup maintenance blocks external recording starts", awaitPrepared = false) { service ->
+            check(service.stopped)
+            check(LiveNotesApplication.instance.appContainer.repository.starts.isEmpty())
+            check(NemotronTranscriber.instances.isEmpty())
+            check(ServiceStateTracker.lastTranscriptionError.value.orEmpty().contains("backup"))
+        }
+    } finally { maintenance.close() }
     println("$passed service lifecycle scenarios passed")
 }

@@ -12,6 +12,8 @@ import java.io.IOException
 import java.security.MessageDigest
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.locks.ReentrantLock
+import java.io.Closeable
+import java.util.concurrent.atomic.AtomicBoolean
 
 sealed class ModelDownloadState {
     object Idle : ModelDownloadState()
@@ -42,6 +44,7 @@ class ModelDownloadManager internal constructor(
     // Short file/lease transitions only. Never hold this during hashing or network I/O.
     private val captureGuard = Any()
     private val captureUsers = mutableMapOf<SpeechModel, Int>()
+    private var archiveInProgress = false
     private val _state = MutableStateFlow<ModelDownloadState>(ModelDownloadState.Idle)
     val state: StateFlow<ModelDownloadState> = _state.asStateFlow()
     private val _downloadTarget = MutableStateFlow<SpeechModel?>(null)
@@ -55,9 +58,29 @@ class ModelDownloadManager internal constructor(
 
     /** Pins an installed file against removal/repair until its capture owner releases it. */
     fun acquireForCapture(model: SpeechModel): Boolean = synchronized(captureGuard) {
+        if (archiveInProgress) return@synchronized false
         if (!isDownloaded(model)) return@synchronized false
         captureUsers[model] = (captureUsers[model] ?: 0) + 1
         true
+    }
+
+    /** No thread-owned lock is retained across a suspendable backup/restore operation. */
+    fun acquireArchiveLease(): Closeable = synchronized(captureGuard) {
+        if (archiveInProgress || operationLock.isLocked || captureUsers.isNotEmpty()) {
+            throw IOException("Stop recording and wait for model changes before using a backup.")
+        }
+        archiveInProgress = true
+        val released = AtomicBoolean(false)
+        Closeable {
+            if (released.compareAndSet(false, true)) synchronized(captureGuard) {
+                archiveInProgress = false
+                refreshDownloadedModels()
+            }
+        }
+    }
+
+    private fun requireNoArchive() = synchronized(captureGuard) {
+        if (archiveInProgress) throw IOException("Wait for the backup operation to finish before changing speech models.")
     }
 
     fun releaseFromCapture(model: SpeechModel) = synchronized(captureGuard) {
@@ -115,6 +138,7 @@ class ModelDownloadManager internal constructor(
     fun download(model: SpeechModel) {
         if (!operationLock.tryLock()) return
         try {
+            requireNoArchive()
             _downloadTarget.value = model
             _state.value = ModelDownloadState.CheckingExisting
             checkModelUnused(model)
@@ -262,6 +286,7 @@ class ModelDownloadManager internal constructor(
 
     private fun deleteAndReportResult(model: SpeechModel) {
         try {
+            requireNoArchive()
             deleteUnusedModel(model)
         } catch (error: IOException) {
             _downloadTarget.value = model

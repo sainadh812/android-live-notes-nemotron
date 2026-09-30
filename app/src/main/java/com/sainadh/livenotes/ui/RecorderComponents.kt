@@ -2,6 +2,7 @@ package com.sainadh.livenotes.ui
 
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.interaction.DragInteraction
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -33,6 +34,7 @@ import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.LinearProgressIndicator
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
@@ -53,7 +55,10 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.semantics.CustomAccessibilityAction
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.customActions
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.SpanStyle
@@ -92,8 +97,8 @@ fun recordingTime(milliseconds: Long): String {
 }
 
 @Composable
-private fun RecorderSurface(content: @Composable ColumnScope.() -> Unit) {
-    Card(Modifier.fillMaxWidth(), shape = RoundedCornerShape(24.dp), colors = CardDefaults.cardColors(containerColor = Color.White)) {
+private fun RecorderSurface(modifier: Modifier = Modifier, content: @Composable ColumnScope.() -> Unit) {
+    Card(modifier.fillMaxWidth(), shape = RoundedCornerShape(24.dp), colors = CardDefaults.cardColors(containerColor = Color.White)) {
         Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp), content = content)
     }
 }
@@ -256,11 +261,19 @@ fun LiveTranscriptPanel(
 fun RecordingLibraryCard(
     recording: SavedRecording, isPlaying: Boolean, playbackEnabled: Boolean, onOpen: () -> Unit, onPlay: () -> Unit,
     organization: NoteOrganization? = null, categoryName: String? = null,
-    onBookmark: (() -> Unit)? = null, onEdit: (() -> Unit)? = null, organizationReady: Boolean = true
+    onBookmark: (() -> Unit)? = null, onEdit: (() -> Unit)? = null, organizationReady: Boolean = true,
+    onDelete: (() -> Unit)? = null
 ) {
     val recordingInProgress = recording.audioStatus == RecordingAudioStatus.RECORDING
     val hasAudio = recording.audioFileName != null && recording.audioStatus == RecordingAudioStatus.READY
-    RecorderSurface {
+    var actionsExpanded by remember(recording.recordingId) { mutableStateOf(false) }
+    val canDelete = onDelete != null && !recordingInProgress
+    val cardActions = if (canDelete) Modifier.pointerInput(recording.recordingId) {
+        detectTapGestures(onLongPress = { actionsExpanded = true })
+    }.semantics {
+        customActions = listOf(CustomAccessibilityAction("Recording actions") { actionsExpanded = true; true })
+    } else Modifier
+    RecorderSurface(cardActions) {
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.Top) {
             Box(Modifier.size(44.dp).background(Mint, RoundedCornerShape(15.dp)), contentAlignment = Alignment.Center) {
                 Text(if (hasAudio) "♫" else "T", color = Green, fontSize = 23.sp)
@@ -268,6 +281,20 @@ fun RecordingLibraryCard(
             Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 Text(recording.title, style = MaterialTheme.typography.titleMedium, maxLines = 2, overflow = TextOverflow.Ellipsis)
                 Text(recordingDate(recording) + if (recording.durationMs > 0) " · ${recordingTime(recording.durationMs)}" else "", style = MaterialTheme.typography.bodySmall, color = Gray)
+            }
+            if (onDelete != null) {
+                Box {
+                    IconButton(onClick = { actionsExpanded = true }, enabled = canDelete,
+                        modifier = Modifier.size(48.dp).semantics { contentDescription = "Recording actions for ${recording.title}" }) {
+                        Text("⋮", style = MaterialTheme.typography.headlineSmall)
+                    }
+                    DropdownMenu(expanded = actionsExpanded && canDelete, onDismissRequest = { actionsExpanded = false }) {
+                        DropdownMenuItem(text = { Text("Delete recording", color = MaterialTheme.colorScheme.error) }, onClick = {
+                            actionsExpanded = false
+                            onDelete()
+                        })
+                    }
+                }
             }
         }
         NoteCategoryBadge(categoryName)
@@ -338,11 +365,13 @@ fun RecordingDetailScreen(
     onEdit: (() -> Unit)? = null,
     onShareNote: (() -> Unit)? = null,
     onExportNote: (() -> Unit)? = null,
-    organizationReady: Boolean = true
+    organizationReady: Boolean = true,
+    onDelete: (() -> Unit)? = null
 ) {
     val current = playback.recordingId == recording.recordingId
     val hasAudio = recording.audioFileName != null && recording.audioStatus == RecordingAudioStatus.READY
     val recordingInProgress = recording.audioStatus == RecordingAudioStatus.RECORDING
+    var actionsExpanded by remember(recording.recordingId) { mutableStateOf(false) }
     val positionMs = if (current) playback.positionMs else 0L
     val durationMs = if (current && playback.durationMs > 0) playback.durationMs else recording.durationMs
     val playing = current && playback.isPlaying
@@ -366,6 +395,21 @@ fun RecordingDetailScreen(
                     TextButton(onClick = onBack, modifier = Modifier.heightIn(min = 48.dp)) { Text("‹  Back") }
                     Spacer(Modifier.weight(1f))
                     Text("RECORDING", style = MaterialTheme.typography.labelMedium, color = Gray, modifier = Modifier.padding(end = 12.dp))
+                    if (onDelete != null) {
+                        Box {
+                            IconButton(onClick = { actionsExpanded = true }, enabled = !captureActive && !recordingInProgress,
+                                modifier = Modifier.size(48.dp).semantics { contentDescription = "Recording actions for ${recording.title}" }) {
+                                Text("⋮", style = MaterialTheme.typography.headlineSmall)
+                            }
+                            DropdownMenu(expanded = actionsExpanded && !captureActive && !recordingInProgress,
+                                onDismissRequest = { actionsExpanded = false }) {
+                                DropdownMenuItem(text = { Text("Delete recording", color = MaterialTheme.colorScheme.error) }, onClick = {
+                                    actionsExpanded = false
+                                    onDelete()
+                                })
+                            }
+                        }
+                    }
                 }
             }
         },

@@ -32,6 +32,7 @@ java -cp "$TASK_KOTLIN_LIB/*" org.jetbrains.kotlin.cli.jvm.K2JVMCompiler \
     "$TASK_REPO_ROOT/app/src/main/java/com/sainadh/livenotes/stt/SpeechTranscriber.kt" \
     "$TASK_REPO_ROOT/app/src/main/java/com/sainadh/livenotes/stt/TranscriptUpdate.kt" \
     "$TASK_REPO_ROOT/app/src/main/java/com/sainadh/livenotes/stt/LiveTranscriptBuffer.kt" \
+    "$TASK_REPO_ROOT/app/src/main/java/com/sainadh/livenotes/data/AppDataMaintenance.kt" \
     "$TASK_REPO_ROOT/app/src/main/java/com/sainadh/livenotes/service/ForegroundListeningService.kt"
 timeout 30s java -Dkotlinx.coroutines.fast.service.loader=false \
     -cp "$TASK_BUILD_DIR/classes:$TASK_CLASSPATH" ServiceLifecycleTestKt

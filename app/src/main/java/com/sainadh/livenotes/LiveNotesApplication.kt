@@ -6,6 +6,8 @@ import com.sainadh.livenotes.ai.ConversationOrchestrator
 import com.sainadh.livenotes.data.ApiKeyStore
 import com.sainadh.livenotes.data.NotesDatabase
 import com.sainadh.livenotes.data.NotesRepository
+import com.sainadh.livenotes.data.RecordingFileDeletion
+import com.sainadh.livenotes.backup.LocalBackupManager
 import com.sainadh.livenotes.stt.ModelDownloadManager
 import com.sainadh.livenotes.stt.SpeechSettingsStore
 import kotlinx.coroutines.CoroutineScope
@@ -41,9 +43,11 @@ class AppContainer(application: Application) {
     )
 
     val repository: NotesRepository = notesRepository
+    val recordingFileDeletion = RecordingFileDeletion(application, notesRepository)
     // Runs once before a new recording can start. Recover checkpointed samples
     // after process death, including a rename completed before the database write.
     val recordingRecovery = summaryScope.async {
+        recordingFileDeletion.recover()
         notesRepository.unfinishedRecordings().forEach { recording ->
             val audio = runCatching {
                 val id = java.util.UUID.fromString(recording.recordingId).toString()
@@ -55,4 +59,5 @@ class AppContainer(application: Application) {
     val secureSettings: ApiKeyStore = apiKeyStore
     val modelDownloadManager = ModelDownloadManager(application)
     val speechSettings = SpeechSettingsStore(application, modelDownloadManager.findAnyDownloaded())
+    val localBackupManager = LocalBackupManager(application, notesRepository, apiKeyStore, speechSettings, modelDownloadManager)
 }

@@ -20,9 +20,9 @@ You can also download a model in your browser and use **Settings → Import .ggu
 on its matching model card, then **Use model**. See the
 [download and import instructions](desktop/README.md#speech-model-downloads-and-imports).
 
-Android app in Kotlin for live speech transcription, daily notes, and AI summaries with action items. Supports Android 8+ on arm64 devices.
+Android app in Kotlin for live speech transcription, daily notes, and AI summaries with action items. Supports Android 8+; production bundles include ARM64, ARMv7, x86 and x86_64 native libraries.
 
-[Download Preview 1.2.1 APK](https://github.com/sainadh812/android-live-notes-nemotron/releases/download/v1.2.1-preview-notes/LiveMeetingNotes-1.2.1-preview.apk) · [Model comparison and validation](SPEECH_MODELS.md)
+[Download Preview 1.2.2 APK](https://github.com/sainadh812/android-live-notes-nemotron/releases/download/v1.2.2-preview-backup/LiveMeetingNotes-1.2.2-preview.apk) · [Play publishing AAB](https://github.com/sainadh812/android-live-notes-nemotron/releases/download/android-v1.2.2-play-all-abis/LiveMeetingNotes-1.2.2-play-all-abis.aab) · [Model comparison and validation](SPEECH_MODELS.md)
 
 - Choose Moonshine Tiny Streaming for English short notes, Nemotron English for longer English sessions, or Nemotron 3.5 for 32 supported language locales. All downloaded models run on the CPU on your phone. See [model choices and evidence](SPEECH_MODELS.md).
 - Android speech is an explicit alternative and the initial choice on a new installation. Its provider may use network recognition; availability depends on the device. Downloads do not change your selected engine.
@@ -34,17 +34,33 @@ Android app in Kotlin for live speech transcription, daily notes, and AI summari
 
 - Record, Notes, and Settings tabs keep capture controls separate from downloads and AI setup. Model files use immutable URLs and SHA-256 verification, with validated partial-download recovery.
 
-## Organize your notes — Android 1.2.1 Preview
+## Organize your notes
 
 In **Notes**, choose **Edit details** on a recording or daily note to set its name, assign a category, and write or paste text into **My summary**. Pasting a summary from Gemini or another app works without an AI key. Choose **Save** to keep it. Manual summaries stay separate from transcripts and automatic summaries, so later transcription or AI updates do not replace your text.
 
 Use **Bookmark** for important entries, **Bookmarked** to filter them, and **Manage categories** to create or rename categories. Deleting a category leaves its notes uncategorized. Search matches names, transcripts, user summaries and category names. A recording's **Share note** and **Save note .txt** include its name, category and manual summary; transcript-only actions remain available.
 
-Install **1.2.1 Preview over 1.2.0 Preview** using Android's Update action. Do not uninstall or clear app storage. The package remains `com.sainadh.livenotes.preview`, version code increases from 7 to 8, and the original Preview signing key is retained. Room migration 3→4 adds separate annotation/category tables without changing the previous notes, recordings or transcript tables. Earlier database versions also have migration paths. The production app is a separate package and is not the update target for a Preview installation.
+Install **1.2.2 Preview over your existing Preview app** using Android's Update action. Do not uninstall or clear app storage. The package remains `com.sainadh.livenotes.preview` and retains the original Preview signing key. Existing notes and recordings are preserved, including upgrades from 1.2.0. The Play Store app uses a separate package; use backup and restore to move your library between them.
+
+## Backup, restore and move to Google Play — Android 1.2.2
+
+1. Update the existing Preview app to **1.2.2 Preview without uninstalling it**.
+2. Stop recording, then open **Settings → Create backup**. Choose and confirm a password of at least eight characters. **Include downloaded models** starts enabled; turn it off for a smaller backup and download the models again after restoring.
+3. Save the `.livenotes` file outside the app, such as **Downloads or Drive**. Wait for **“Backup saved and verified”** before continuing. Keep both the file and its password.
+4. Install or update the destination Play Store app to **1.2.2 or later with Restore backup**. Version **1.2.1 cannot restore these backups**. Open **Settings → Restore backup**, choose the saved file, and enter its password. Existing notes are kept and imported notes are merged; saved settings are restored.
+5. In the destination app, check your notes, summaries and categories, play a saved recording, and check your model selection. **Only then remove the old app.**
+
+Backups contain transcripts, daily notes, audio and word timings, names, bookmarks, categories, personal summaries, settings and saved API keys. They are password protected; downloaded models are optional. Files saved in Downloads or Drive remain after uninstalling the app. Keep the backup private and retain its password.
+
+The [Play AAB](https://github.com/sainadh812/android-live-notes-nemotron/releases/download/android-v1.2.2-play-all-abis/LiveMeetingNotes-1.2.2-play-all-abis.aab) is for publishing through Play Console, not direct phone installation. For an older production-package sideload installation signed with the same key, the [1.2.2 migration APK](https://github.com/sainadh812/android-live-notes-nemotron/releases/download/android-v1.2.2-play/LiveMeetingNotes-1.2.2-migration.apk) adds backup before moving to the Play Store build. Preview users should use the Preview APK above.
+
+## Delete a recording
+
+In **Notes**, long-press a recording or open its **⋮** menu, choose **Delete recording**, and confirm. The recording's audio, transcript, personal summary, name and bookmark are removed. Other recordings, daily summaries and categories are kept. Deleting a recording does not remove copies in exported backups.
 
 ## Recorder and playback
 
-Version 1.1.0 adds a live microphone level display, recording timer, auto-following transcript, an audio library, and a dedicated playback screen. Copy/share/export actions are also available for daily summaries and action items. Recordings stay in app-private storage; sharing grants temporary read access to the selected WAV only. WAV audio uses about 1.9 MB per minute and is not included in cloud backup. The app pauses playback when starting capture, leaving the app, losing audio focus, or disconnecting headphones.
+Version 1.1.0 adds a live microphone level display, recording timer, auto-following transcript, an audio library, and a dedicated playback screen. Copy/share/export actions are also available for daily summaries and action items. Recordings stay in app-private storage; sharing grants temporary read access to the selected WAV only. WAV audio uses about 1.9 MB per minute and is excluded from Android's automatic cloud backup. Settings → Create backup includes saved audio. The app pauses playback when starting capture, leaving the app, losing audio focus, or disconnecting headphones.
 
 Audio is checkpointed while capturing and finalized before it appears as playable. After a process restart, valid interrupted WAV files are recovered. Audio-only captures are retained if recognition fails. A Room v3 migration preserves old transcripts, partial revisions, and summaries. Models and saved recordings are separate: removing a speech model does not remove recordings.
 
@@ -58,13 +74,13 @@ The Android app is free. Settings includes four repeatable Google Play support p
 
 For Google Play upload instructions, store listing text, privacy drafts, and release signing, see [the Google Play setup guide](distribution/google-play/README.md).
 
-Install JDK 17 and the Android SDK with platform 36, build tools 35.0.0, and NDK 27.2.12479018. Set `ANDROID_HOME` to your SDK directory, or put `sdk.dir=/path/to/android-sdk` in the ignored `local.properties` file.
+Install JDK 17 and the Android SDK with platform 36, build tools 35.0.0, and NDK 27.2.12479018, plus CMake, Ninja, Git and ripgrep on Linux x86_64. Set `ANDROID_HOME` to your SDK directory, or put `sdk.dir=/path/to/android-sdk` in the ignored `local.properties` file.
 
 ```sh
 ./gradlew :app:testDebugUnitTest :app:lintDebug :app:assembleDebug
 ```
 
-The debug APK is `app/build/outputs/apk/debug/app-debug.apk`. The current Android app version is 1.2.1 (version code 8). Windows users can invoke the same tasks with `gradlew.bat`.
+The debug APK is `app/build/outputs/apk/debug/app-debug.apk`. The current Android app version is 1.2.2 (version code 9). Production native compilation currently uses Linux x86_64; Windows users can use GitHub Actions or build the precompiled ARM64 Preview variant.
 
 For a phone trial alongside an older installation, build with `-PpreviewBuild=true`:
 
@@ -72,11 +88,11 @@ For a phone trial alongside an older installation, build with `-PpreviewBuild=tr
 ./gradlew :app:assembleDebug -PpreviewBuild=true -PdevelopmentKeystore=/path/to/original-preview.keystore
 ```
 
-This produces **LiveMeetingNotes Preview** with package `com.sainadh.livenotes.preview`, separate notes/settings/models, and version 1.2.1-preview. The Preview APK uses this workspace’s existing debug signing key and is intended to update the previous Preview installation, preserving its notes and models. Android requires the installed package to have the same signing certificate. The original non-Preview app remains a separate installation.
+This produces **LiveMeetingNotes Preview** with package `com.sainadh.livenotes.preview`, separate notes/settings/models, and version 1.2.2-preview. The Preview APK uses this workspace’s existing debug signing key and is intended to update the previous Preview installation, preserving its notes and models. Android requires the installed package to have the same signing certificate. The original non-Preview app remains a separate installation.
 
 Network-specific Gradle proxy settings belong in your personal `~/.gradle/gradle.properties`; the repository does not force a corporate proxy.
 
-The app packages arm64 native libraries. The JNI source and binary hashes are checked before each Android build. After changing C++, rebuild the JNI library using the pinned script described in [native build instructions](app/src/main/cpp/BUILDING.md):
+Production builds automatically compile all five native libraries for all four Android ABIs from pinned sources and include full native debug symbols in release AABs. Preview builds retain the checked-in ARM64 libraries and verify their source/binary hashes. After changing C++, rebuild the Preview JNI library using the pinned script described in [native build instructions](app/src/main/cpp/BUILDING.md):
 
 ```sh
 ANDROID_NDK_HOME=/path/to/android-sdk/ndk/27.2.12479018 ./scripts/build-native-jni.sh
@@ -108,6 +124,6 @@ The native and Kotlin host checks use controlled test doubles and validate the a
 
 ## Validation limits
 
-The JNI update-initialization defect and asynchronous shutdown races have regression coverage. Native library segments support 16 KB pages. Real microphone routing, recognition quality, performance, and background behavior still need validation on a physical phone with a valid model. Models are downloaded separately and are not bundled in the APK. This build targets arm64; an x86 emulator cannot execute the bundled native engine.
+The JNI update-initialization defect and asynchronous shutdown races have regression coverage. Native library segments support 16 KB pages. Real microphone routing, recognition quality, performance, and background behavior still need validation on a physical phone with a valid model. Models are downloaded separately and are not bundled in the APK. The Preview APK targets ARM64. Production builds also contain ARMv7, x86 and x86_64 engines; instrumented UI builds deliberately exclude native libraries.
 
 See [transcription reliability changes](TRANSCRIPTION_RELIABILITY.md) for capture buffering, retry recovery, storage migration, and remaining limits.

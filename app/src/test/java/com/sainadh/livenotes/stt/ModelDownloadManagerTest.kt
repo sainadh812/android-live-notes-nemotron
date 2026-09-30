@@ -25,6 +25,30 @@ class ModelDownloadManagerTest {
     @get:Rule val temporaryFolder = TemporaryFolder()
     private val model = SpeechModel.MOONSHINE_TINY
 
+    @Test fun archiveLeaseBlocksModelMutationsAndCanCloseOnAnotherThread() {
+        val directory = temporaryFolder.newFolder()
+        val requests = AtomicInteger()
+        val client = OkHttpClient.Builder().addInterceptor { throw AssertionError("Archive lease must prevent network I/O: ${requests.incrementAndGet()}") }.build()
+        val manager = ModelDownloadManager(directory, client)
+        val partial = File(directory, "${model.fileName}.part").apply { writeText("keep partial model") }
+        val lease = manager.acquireArchiveLease()
+        manager.download(model)
+        manager.delete(model)
+        assertEquals("keep partial model", partial.readText())
+        assertEquals(0, requests.get())
+        assertFalse(manager.acquireForCapture(model))
+        assertThrows(IOException::class.java) { manager.acquireArchiveLease() }
+        val error = java.util.concurrent.atomic.AtomicReference<Throwable?>()
+        val closer = Thread { try { lease.close() } catch (failure: Throwable) { error.set(failure) } }
+        closer.start(); closer.join(5_000)
+        assertFalse(closer.isAlive)
+        assertNull(error.get())
+        val later = manager.acquireArchiveLease()
+        lease.close() // Idempotence cannot release a later owner's lease.
+        assertThrows(IOException::class.java) { manager.acquireArchiveLease() }
+        later.close()
+    }
+
     @Test fun acceptsOnlyTheRequestedRangeAndImmutableTotal() {
         assertEquals(1000L, validateModelContentRange("bytes 600-999/1000", 600, 1000, 400))
         assertEquals(800L, validateModelContentRange("bytes 600-799/1000", 600, 1000, -1))

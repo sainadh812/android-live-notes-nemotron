@@ -1,8 +1,8 @@
 # Google Play setup for Live Meeting Notes
 
-Updated September 27, 2026 for free download and optional support purchases. This folder prepares the first Android release. No Play Console upload or app publication has been performed from this workspace. The privacy policy is published on GitHub Pages.
+Updated September 30, 2026 for free download and optional support purchases. This folder prepares the first Android release. No Play Console upload or app publication has been performed from this workspace. The privacy policy is published on GitHub Pages.
 
-Version 1.2.0 (code 7) adds optional Google Play support purchases. Build it with the **Android Play build** GitHub Actions workflow described in [BILLING-SETUP.md](BILLING-SETUP.md). The older local 1.1.1 ZIP/AAB does not contain billing and must not be used for this update.
+Version 1.2.2 (code 9) adds portable backup/restore and recording deletion, with native libraries for all four Android ABIs. Build it with the **Android Play build** GitHub Actions workflow described in [BILLING-SETUP.md](BILLING-SETUP.md). The older local 1.1.1 ZIP/AAB does not contain billing and must not be used for this update.
 
 ## First step in Play Console
 
@@ -15,9 +15,9 @@ The public developer name is **Oh-my-pi**. Set **Products → App pricing → Fr
 ## App bundle and signing
 
 - Production application ID: `com.sainadh.livenotes`.
-- Android version: `1.2.0`; version code: `7`.
+- Android version: `1.2.2`; version code: `9`.
 - Minimum Android: 8/API 26; target: Android 16/API 36.
-- Supported native architecture: `arm64-v8a`.
+- Supported native architectures: `arm64-v8a`, `armeabi-v7a`, `x86`, `x86_64`; full native debug symbols are embedded in the AAB.
 - Build output to upload: `app/build/outputs/bundle/release/app-release.aab`.
 - Direct-install release APK for local testing: `app/build/outputs/apk/release/app-release.apk`.
 
@@ -31,7 +31,7 @@ The upload key and a private copy of its configuration are stored outside the re
 
 Use GitHub Actions for builds. The existing upload key is configured in the four repository secrets listed in [BILLING-SETUP.md](BILLING-SETUP.md). For future builds, manually run **Android Play build** with `signed_release` checked. The workflow runs tests/lint and publishes the signed AAB as the `live-notes-play-bundle` artifact. Never create a replacement upload key just to make CI pass.
 
-Release builds reject preview and emulator-test flags. Increase `versionCode` for subsequent Play uploads; if code 7 has already been uploaded to this Play entry, increase it before uploading again. Do not upload a Preview/debug APK. A development build with the same package and a different signing key will not accept an in-place release update; export any needed data before changing installations. A Play-signed installation also differs from a directly installed upload-key-signed APK.
+Release builds reject preview and emulator-test flags. Increase `versionCode` for subsequent Play uploads; if code 9 has already been uploaded to this Play entry, increase it before uploading again. Do not upload a Preview/debug APK. A development build with the same package and a different signing key will not accept an in-place release update; export any needed data before changing installations. A Play-signed installation also differs from a directly installed upload-key-signed APK.
 
 ## First upload: internal testing
 

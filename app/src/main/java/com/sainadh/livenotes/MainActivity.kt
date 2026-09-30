@@ -60,6 +60,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.Typography
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -118,6 +119,12 @@ import com.sainadh.livenotes.ui.NoteCategoryBadge
 import com.sainadh.livenotes.ui.UserSummary
 import com.sainadh.livenotes.ui.matchesNoteFilters
 import com.sainadh.livenotes.ui.organizedNoteText
+import com.sainadh.livenotes.ui.BackupSettingsCard
+import com.sainadh.livenotes.ui.BackupPasswordState
+import com.sainadh.livenotes.ui.BackupPasswordMode
+import com.sainadh.livenotes.ui.BackupPasswordDialog
+import com.sainadh.livenotes.ui.RecordingDeleteDialog
+import com.sainadh.livenotes.data.AppDataMaintenance
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -222,11 +229,16 @@ private fun LiveNotesScreen(viewModel: MainViewModel, activityLifecycle: Lifecyc
     val todayNote by viewModel.todayNote.collectAsStateWithLifecycle(lifecycle = activityLifecycle)
     val allNotes by viewModel.allNotes.collectAsStateWithLifecycle(lifecycle = activityLifecycle)
     val savedRecordings by viewModel.savedRecordings.collectAsStateWithLifecycle(lifecycle = activityLifecycle)
+    val transfer = androidx.lifecycle.viewmodel.compose.viewModel<LibraryTransferViewModel>()
+    val transferState by transfer.state.collectAsStateWithLifecycle(lifecycle = activityLifecycle)
+    val deletingRecording by transfer.deletion.collectAsStateWithLifecycle(lifecycle = activityLifecycle)
+    val maintenanceBusy by AppDataMaintenance.busy.collectAsStateWithLifecycle(lifecycle = activityLifecycle)
+    val backupPassword = androidx.lifecycle.viewmodel.compose.viewModel<BackupPasswordState>()
     val noteOrganizationSnapshot by viewModel.noteOrganizations.collectAsStateWithLifecycle(lifecycle = activityLifecycle)
     val noteOrganizations = noteOrganizationSnapshot.orEmpty()
     val noteCategorySnapshot by viewModel.noteCategories.collectAsStateWithLifecycle(lifecycle = activityLifecycle)
     val noteCategories = noteCategorySnapshot.orEmpty()
-    val organizationReady = noteOrganizationSnapshot != null && noteCategorySnapshot != null
+    val organizationReady = noteOrganizationSnapshot != null && noteCategorySnapshot != null && !maintenanceBusy
     val noteMessage by viewModel.noteMessage.collectAsStateWithLifecycle(lifecycle = activityLifecycle)
     val editor = androidx.lifecycle.viewmodel.compose.viewModel<NoteEditorState>()
     var manageCategories by rememberSaveable { mutableStateOf(false) }
@@ -265,6 +277,43 @@ private fun LiveNotesScreen(viewModel: MainViewModel, activityLifecycle: Lifecyc
     // Only a short cache filename enters saved state; a long meeting must not overflow its Bundle.
     var exportDraftName by rememberSaveable { mutableStateOf<String?>(null) }
     val coroutineScope = rememberCoroutineScope()
+    val backupCreateLauncher = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/octet-stream")) { uri ->
+        transfer.exportTo(uri)
+    }
+    val backupRestoreLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        transfer.chooseRestore(uri)
+        if (uri != null) backupPassword.open(BackupPasswordMode.RESTORE)
+    }
+    BackupPasswordDialog(backupPassword, busy = transferState.busy, progress = transferState.progress,
+        error = transferState.message.takeIf { transferState.isError && backupPassword.mode == BackupPasswordMode.RESTORE },
+        onDismiss = transfer::cancelPicker,
+        onConfirm = { password, includeModels ->
+            val mode = backupPassword.mode
+            if (mode == BackupPasswordMode.CREATE) {
+                transfer.prepareExport(password, includeModels)
+                backupPassword.close()
+                runCatching { backupCreateLauncher.launch("LiveMeetingNotes-${LocalDate.now()}.livenotes") }
+                    .onFailure { transfer.pickerFailed() }
+            } else {
+                transfer.restore(password)
+            }
+        })
+    deletingRecording?.let { recording ->
+        RecordingDeleteDialog(recording.title, transferState.busy,
+            transferState.message.takeIf { transferState.isError }, transfer::cancelDeletion,
+            onConfirm = { viewModel.closePlayback(); transfer.deleteSelected() })
+    }
+    LaunchedEffect(transferState.deletedRecordingId) {
+        if (openedRecordingId == transferState.deletedRecordingId) openedRecordingId = null
+    }
+    LaunchedEffect(transferState.message) {
+        transferState.message?.let { Toast.makeText(context, it, Toast.LENGTH_LONG).show() }
+    }
+    DisposableEffect(transferState.busy) {
+        val window = (context as? android.app.Activity)?.window
+        if (transferState.busy) window?.addFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        onDispose { if (transferState.busy) window?.clearFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON) }
+    }
     val exportLauncher = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("text/plain")) { uri ->
         val draftName = exportDraftName
         exportDraftName = null
@@ -333,6 +382,17 @@ private fun LiveNotesScreen(viewModel: MainViewModel, activityLifecycle: Lifecyc
     var selectedAudioInput by rememberSaveable { mutableStateOf(viewModel.currentAudioInputMode()) }
     var savedAudioInput by rememberSaveable { mutableStateOf(viewModel.currentAudioInputMode()) }
     var showMoreModels by rememberSaveable { mutableStateOf(false) }
+    LaunchedEffect(transferState.restoreGeneration) {
+        if (transferState.restoreGeneration > 0) {
+            backupPassword.close()
+            selectedProvider = viewModel.currentProvider()
+            selectedModel = viewModel.currentModel()
+            selectedAudioInput = viewModel.currentAudioInputMode()
+            savedAudioInput = selectedAudioInput
+            apiKey = ""
+            viewModel.invalidateRecordingDetails()
+        }
+    }
 
     val permissionLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { granted ->
         val microphoneGranted = granted[Manifest.permission.RECORD_AUDIO]
@@ -342,6 +402,10 @@ private fun LiveNotesScreen(viewModel: MainViewModel, activityLifecycle: Lifecyc
             "Allow microphone access in your phone's app settings, then try recording again."
     }
     fun startRecording() {
+        if (maintenanceBusy) {
+            Toast.makeText(context, "Wait for the file operation to finish.", Toast.LENGTH_SHORT).show()
+            return
+        }
         val permissions = buildList {
             add(Manifest.permission.RECORD_AUDIO)
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) add(Manifest.permission.POST_NOTIFICATIONS)
@@ -414,7 +478,8 @@ private fun LiveNotesScreen(viewModel: MainViewModel, activityLifecycle: Lifecyc
                     onEdit = { if (organizationReady) editor.open(noteKey, openedRecording.title, organization) },
                     onShareNote = { RecordingSharing.shareText(context, recordingNoteText(), openedRecording.title) },
                     onExportNote = { export(recordingNoteText(), "note-${openedRecording.dateKey}.txt") },
-                    organizationReady = organizationReady
+                    organizationReady = organizationReady,
+                    onDelete = if (!maintenanceBusy && capturePhase == CapturePhase.IDLE) ({ transfer.requestDeletion(openedRecording) }) else null
                 )
             }
         }
@@ -571,7 +636,7 @@ private fun LiveNotesScreen(viewModel: MainViewModel, activityLifecycle: Lifecyc
                                 val organization = noteOrganizations[noteKey]
                                 RecordingLibraryCard(recording,
                                     isPlaying = playback.recordingId == recording.recordingId && playback.isPlaying,
-                                    playbackEnabled = capturePhase == CapturePhase.IDLE,
+                                    playbackEnabled = capturePhase == CapturePhase.IDLE && !maintenanceBusy,
                                     onOpen = { openedRecordingId = recording.recordingId },
                                     onPlay = {
                                         openedRecordingId = recording.recordingId
@@ -581,7 +646,8 @@ private fun LiveNotesScreen(viewModel: MainViewModel, activityLifecycle: Lifecyc
                                     organization = organization, categoryName = categoryNames[organization?.categoryId],
                                     onBookmark = { if (organizationReady) viewModel.bookmarkNote(noteKey, organization?.isBookmarked != true) },
                                     onEdit = { if (organizationReady) editor.open(noteKey, recording.title, organization) },
-                                    organizationReady = organizationReady)
+                                    organizationReady = organizationReady,
+                                    onDelete = if (!maintenanceBusy && capturePhase == CapturePhase.IDLE) ({ transfer.requestDeletion(recording) }) else null)
                             }
                         }
                         if (filteredNotes.isNotEmpty()) {
@@ -599,6 +665,15 @@ private fun LiveNotesScreen(viewModel: MainViewModel, activityLifecycle: Lifecyc
                 }
                 AppScreen.SETTINGS -> {
                     item { PageHeading("Make it yours", "Choose how you listen and how you take notes.") }
+                    item {
+                        BackupSettingsCard(transferState.busy, transferState.progress,
+                            onCreate = { backupPassword.open(BackupPasswordMode.CREATE) },
+                            onRestore = {
+                                runCatching { backupRestoreLauncher.launch(arrayOf("application/octet-stream", "application/zip", "*/*")) }
+                                    .onFailure { transfer.pickerFailed() }
+                            }, message = transferState.message,
+                            enabled = capturePhase == CapturePhase.IDLE && !maintenanceBusy)
+                    }
                     item {
                         SpeechSettingsPanel(
                             capturePhase = capturePhase,
@@ -654,7 +729,7 @@ private fun LiveNotesScreen(viewModel: MainViewModel, activityLifecycle: Lifecyc
                         )
                     }
                     item { PrivacySettingsPanel() }
-                    item { Text("Live Notes  ·  ${BuildConfig.VERSION_NAME}", modifier = Modifier.fillMaxWidth(), style = MaterialTheme.typography.bodySmall, color = Muted) }
+                    item { Text("Live Notes  ·  ${BuildConfig.VERSION_NAME}\n${BuildConfig.APPLICATION_ID}", modifier = Modifier.fillMaxWidth(), style = MaterialTheme.typography.bodySmall, color = Muted) }
                 }
             }
         }
@@ -785,7 +860,7 @@ private fun AiSettingsPanel(
 @Composable
 private fun PrivacySettingsPanel() {
     SettingsSection("Privacy", "How Live Meeting Notes handles your information.", NoteIcon.SETTINGS) {
-        Text("Effective September 27, 2026 · Developer: Oh-my-pi", style = MaterialTheme.typography.bodySmall, color = Muted)
+        Text("Effective September 30, 2026 · Developer: Oh-my-pi", style = MaterialTheme.typography.bodySmall, color = Muted)
         Text(
             "The microphone is used after you start a recording. Android speech recognition may send audio to your device's speech-service provider. Downloaded speech models process audio on your phone and save recordings in private app storage.",
             style = MaterialTheme.typography.bodyMedium
@@ -799,7 +874,7 @@ private fun PrivacySettingsPanel() {
             style = MaterialTheme.typography.bodyMedium
         )
         Text(
-            "This version does not provide individual note deletion. Android's Clear storage control removes local app data. It does not remove exported copies, Android backups, or information already handled by external providers.",
+            "Long-press a recording to delete its audio, transcript and attached note details. Separate daily summaries and categories are kept. Password-protected manual backups include notes, recordings, settings and API keys; downloaded models are optional. You choose where to save or share the backup. Deletion and Android's Clear storage control do not remove exported copies, backups, or information already handled by external providers.",
             style = MaterialTheme.typography.bodyMedium
         )
         Text("Optional support purchases use Google Play. The app receives purchase status and tokens, but never your card or bank details.", style = MaterialTheme.typography.bodySmall)
