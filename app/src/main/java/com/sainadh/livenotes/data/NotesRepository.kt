@@ -60,6 +60,7 @@ class NotesRepository(
         val cleanTitle = cleanNoteTitle(title)
         validateUserSummary(userSummary)
         database.withTransaction {
+            requireNoteExists(noteKey)
             require(categoryId == null || categoryDao.get(categoryId) != null) {
                 "This category no longer exists. Choose another category."
             }
@@ -74,11 +75,24 @@ class NotesRepository(
     suspend fun setNoteBookmarked(noteKey: String, bookmarked: Boolean) {
         validateNoteKey(noteKey)
         database.withTransaction {
+            requireNoteExists(noteKey)
             val existing = organizationDao.get(noteKey) ?: NoteOrganizationEntity(noteKey)
             organizationDao.upsert(existing.copy(
                 isBookmarked = bookmarked, updatedAtEpochMs = System.currentTimeMillis()
             ))
         }
+    }
+
+    /** Called inside the annotation write transaction so a late UI write cannot undo deletion. */
+    private suspend fun requireNoteExists(noteKey: String) {
+        val exists = if (noteKey.startsWith("daily:")) {
+            dailyNoteDao.getOne(noteKey.removePrefix("daily:")) != null
+        } else {
+            val recordingId = noteKey.removePrefix("recording:")
+            if (recordingId.startsWith("legacy:")) transcriptChunkDao.dateExists(recordingId.removePrefix("legacy:"))
+            else recordingDao.get(recordingId) != null || segmentDao.recordingExists(recordingId)
+        }
+        require(exists) { "This note no longer exists. Reopen your notes and try again." }
     }
 
     suspend fun createNoteCategory(name: String): NoteCategory {

@@ -38,6 +38,8 @@ class NoteOrganizationPersistenceTest {
     }
 
     @Test fun categoryRenameRetainsAssignmentsAndDeleteRetainsNotes() = withRepository { repository ->
+        seedLegacy(repository)
+        repository.upsertNote(DailyNote("2026-09-01", "Automatic summary", "", emptyList(), 1))
         val category = repository.createNoteCategory("  Projects  ")
         val recordingKey = recordingNoteKey("legacy:2026-09-01")
         val dailyKey = dailyNoteKey("2026-09-01")
@@ -70,6 +72,7 @@ class NoteOrganizationPersistenceTest {
         assertEquals(setOf(NoteCategory(work.id, "WORK"), personal), repository.observeNoteCategories().first().toSet())
 
         val key = recordingNoteKey("meeting")
+        seedRecording(repository, "meeting")
         repository.saveNoteDetails(key, "Saved title", personal.id, "Saved summary")
         val saved = repository.observeNoteOrganizations().first()
         expectRejected { repository.saveNoteDetails(key, "New title", "missing", "New summary") }
@@ -79,6 +82,7 @@ class NoteOrganizationPersistenceTest {
     }
 
     @Test fun independentBookmarkAndDetailsWritesDoNotEraseEachOther() = withRepository { repository ->
+        seedRecording(repository, "recording-one")
         val key = recordingNoteKey("recording-one")
         repository.saveNoteDetails(key, "Original", null, "First summary")
         coroutineScope {
@@ -101,13 +105,49 @@ class NoteOrganizationPersistenceTest {
     }
 
     @Test fun bookmarkedLegacyTextNeedsNoSyntheticRecordingRow() = withRepository { repository ->
+        seedLegacy(repository)
         val key = recordingNoteKey("legacy:2026-09-01")
         repository.setNoteBookmarked(key, true)
         repository.saveNoteDetails(key, "Older notes", null, "User-written summary")
         val saved = repository.observeNoteOrganizations().first().single()
         assertEquals(key, saved.noteKey)
         assertTrue(saved.isBookmarked)
-        assertTrue(repository.observeSavedRecordings().first().isEmpty())
+        assertEquals("legacy:2026-09-01", repository.observeSavedRecordings().first().single().recordingId)
+        assertNull(repository.getRecordingMetadata("legacy:2026-09-01"))
+    }
+
+    @Test fun lateEditsAndBookmarksCannotRecreateDeletedAnnotationsOrBreakBackups() = withRepository { repository ->
+        seedRecording(repository, "meeting")
+        seedLegacy(repository)
+        repository.importSnapshot(LibrarySnapshot(segments = listOf(
+            TranscriptSegmentEntity("text-only", 0, "2026-09-01", "Stored transcript", "FINAL", false, 1, 1, 1, 0)
+        )))
+        for (id in listOf("meeting", "text-only", "legacy:2026-09-01")) {
+            val key = recordingNoteKey(id)
+            repository.saveNoteDetails(key, "Before deletion", null, "Preserved until deletion")
+            repository.setNoteBookmarked(key, true)
+            repository.deleteRecording(id)
+
+            // Simulate callbacks queued by a card/editor before its recording was deleted.
+            expectRejected { repository.saveNoteDetails(key, "Late edit", null, "Old editor contents") }
+            expectRejected { repository.setNoteBookmarked(key, true) }
+            expectRejected { repository.setNoteBookmarked(key, false) }
+            assertTrue(repository.observeNoteOrganizations().first().none { it.noteKey == key })
+            validateLibrarySnapshot(repository.exportSnapshot())
+        }
+        expectRejected { repository.saveNoteDetails(dailyNoteKey("2026-09-01"), "Missing day", null, "") }
+        expectRejected { repository.setNoteBookmarked(dailyNoteKey("2026-09-01"), true) }
+    }
+
+    private suspend fun seedRecording(repository: NotesRepository, id: String) {
+        repository.beginRecording(id, 1)
+        repository.finishRecording(id, null, 0)
+    }
+
+    private suspend fun seedLegacy(repository: NotesRepository) {
+        repository.importSnapshot(LibrarySnapshot(chunks = listOf(
+            TranscriptChunkEntity(1, "2026-09-01", "An older transcript", true, 1)
+        )))
     }
 
     private suspend fun expectRejected(block: suspend () -> Unit) {
