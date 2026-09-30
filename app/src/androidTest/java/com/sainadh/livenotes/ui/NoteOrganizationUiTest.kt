@@ -36,7 +36,7 @@ class NoteOrganizationUiTest {
         val summary = "Summary pasted from another app.\n\nFollow up with the team."
         compose.onNodeWithText("My summary").performScrollTo().performTextReplacement(summary)
         compose.onNodeWithText("Save").performClick()
-        compose.onNodeWithText("Storage unavailable").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithText("Storage unavailable").assertIsDisplayed()
         compose.runOnIdle { assertEquals(summary, editor.draft?.userSummary) }
         compose.onNodeWithText("Save").performClick()
         compose.runOnIdle { assertEquals(summary, savedSummary); assertEquals(2, attempts); assertNull(editor.draft) }

@@ -14,14 +14,17 @@ import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performImeAction
 import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performScrollToNode
 import androidx.compose.ui.test.performTextReplacement
 import androidx.test.core.app.ActivityScenario
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
+import androidx.lifecycle.ViewModelProvider
 import com.sainadh.livenotes.LiveNotesApplication
 import com.sainadh.livenotes.MainActivity
+import com.sainadh.livenotes.MainViewModel
 import com.sainadh.livenotes.data.recordingNoteKey
 import com.sainadh.livenotes.stt.TranscriptStatus
 import com.sainadh.livenotes.stt.TranscriptUpdate
@@ -62,10 +65,16 @@ class NoteOrganizationFlowTest {
 
         ActivityScenario.launch(MainActivity::class.java).use { activity ->
             compose.onNodeWithText("Notes").performClick()
-            compose.onNodeWithText("Search notes").performTextReplacement(originalTitle)
+            lateinit var model: MainViewModel
+            activity.onActivity { model = ViewModelProvider(it)[MainViewModel::class.java] }
             compose.waitUntil(10_000) {
-                compose.onAllNodesWithText("Recordings · 1").fetchSemanticsNodes().isNotEmpty()
+                model.savedRecordings.value.any { it.recordingId == recordingId } &&
+                    model.noteOrganizations.value != null && model.noteCategories.value != null
             }
+            compose.onNodeWithText("Search notes").performTextReplacement(originalTitle)
+            compose.onNodeWithText("Search notes").performImeAction()
+            compose.onNode(lazyList).performScrollToNode(hasText("Recordings · 1"))
+            compose.onNodeWithText("Recordings · 1").assertIsDisplayed()
             compose.onNode(lazyList).performScrollToNode(hasText("Edit details"))
             compose.waitUntil(10_000) {
                 compose.onAllNodes(hasText("Edit details") and isEnabled()).fetchSemanticsNodes().isNotEmpty()
@@ -83,9 +92,12 @@ class NoteOrganizationFlowTest {
             // The renamed note no longer matches the old title. Find it using its new name.
             compose.onNode(lazyList).performScrollToNode(hasText("Search notes"))
             compose.onNodeWithText("Search notes").performTextReplacement(editedTitle)
+            compose.onNodeWithText("Search notes").performImeAction()
             compose.waitUntil(10_000) {
-                compose.onAllNodesWithText("Recordings · 1").fetchSemanticsNodes().isNotEmpty()
+                model.savedRecordings.value.any { it.recordingId == recordingId && it.title == editedTitle }
             }
+            compose.onNode(lazyList).performScrollToNode(hasText("Recordings · 1"))
+            compose.onNodeWithText("Recordings · 1").assertIsDisplayed()
             compose.onNode(lazyList).performScrollToNode(hasContentDescription("Bookmark note"))
             compose.onNode(hasContentDescription("Bookmark note")).performClick()
             compose.waitUntil(10_000) {

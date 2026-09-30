@@ -13,6 +13,8 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
@@ -35,10 +37,13 @@ import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
@@ -84,8 +89,12 @@ fun NotesFilters(
     categories: List<NoteCategory>, onManageCategories: () -> Unit
 ) {
     var categoryMenu by remember { mutableStateOf(false) }
+    val focus = LocalFocusManager.current
+    val keyboard = LocalSoftwareKeyboardController.current
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         OutlinedTextField(query, onQuery, modifier = Modifier.fillMaxWidth(), singleLine = true,
+            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+            keyboardActions = KeyboardActions(onSearch = { focus.clearFocus(); keyboard?.hide() }),
             label = { Text("Search notes") }, placeholder = { Text("Name, transcript, summary or category") })
         FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
             FilterChip(selected = bookmarkedOnly, onClick = { onBookmarkedOnly(!bookmarkedOnly) },
@@ -206,6 +215,8 @@ fun NoteEditDialog(
     var categoryMenu by remember { mutableStateOf(false) }
     var creatingCategory by rememberSaveable { mutableStateOf(false) }
     Dialog(onDismissRequest = state::requestClose, properties = DialogProperties(usePlatformDefaultWidth = false)) {
+        val focus = LocalFocusManager.current
+        val keyboard = LocalSoftwareKeyboardController.current
         Surface(Modifier.fillMaxWidth(.94f).widthIn(max = 640.dp).imePadding(), shape = RoundedCornerShape(24.dp)) {
             Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 Text("Edit note details", style = MaterialTheme.typography.titleLarge)
@@ -230,11 +241,12 @@ fun NoteEditDialog(
                         modifier = Modifier.fillMaxWidth(), label = { Text("My summary") }, minLines = 6, maxLines = 12,
                         placeholder = { Text("Write your notes or paste a summary from Gemini or another app.") },
                         supportingText = { Text("Saved separately from the transcript and automatic summary. Up to 100,000 characters.") })
-                    state.error?.let { Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodyMedium) }
                 }
+                state.error?.let { Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodyMedium) }
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
                     TextButton(onClick = state::requestClose, enabled = !state.saving, modifier = Modifier.heightIn(min = 48.dp)) { Text("Cancel") }
-                    Button(onClick = { state.save(onSave) }, enabled = !state.saving, modifier = Modifier.heightIn(min = 48.dp)) { Text(if (state.saving) "Saving…" else "Save") }
+                    Button(onClick = { focus.clearFocus(); keyboard?.hide(); state.save(onSave) }, enabled = !state.saving,
+                        modifier = Modifier.heightIn(min = 48.dp)) { Text(if (state.saving) "Saving…" else "Save") }
                 }
             }
         }
