@@ -1,7 +1,46 @@
-# Rebuilding the on-device speech JNI bridge
+# Building the on-device speech libraries
 
-The app packages `app/src/main/jniLibs/arm64-v8a/libnemotron_jni.so`.
-Gradle does not compile `nemotron_jni.cpp`; rebuild the library after changing
+## Production bundles: all Android ABIs
+
+On Linux x86_64, `./gradlew :app:bundleRelease` automatically runs
+`scripts/build-native-android.sh` for ARM64, ARMv7, x86 and x86_64. It builds
+all five engine/JNI libraries from transcribe.cpp commit
+`63a44d9239d610b3908e8a66b384924cd4a77217` using NDK **27.2.12479018**,
+Android API 26 and 16 KB LOAD/RELRO alignment. Install CMake, Ninja, Git,
+ripgrep, Python 3 and JDK 17. Generated files stay under ignored
+`build/native-android/`; no additional prebuilt binaries are committed.
+
+Production builds require the existing private upload-key configuration and
+must not use `previewBuild` or `emulatorTests`. `release.ndk.debugSymbolLevel`
+is `FULL`, so Gradle embeds the native debug information in the AAB while
+stripping installed libraries. Verify all 20 symbol files and matching build IDs.
+
+The x86 builds use upstream's conservative instruction-set baseline, without
+AVX/FMA assumptions. ARMv7 disables the optional llamafile CPU optimization:
+its FP16 intrinsics do not compile for the ARMv7 baseline. The tracked CMake
+patch is applied only to an isolated pinned ARMv7 source worktree; ARM64
+retains the optimization. Each build validates engine imports, dependencies,
+JNI exports, ELF identity and alignment before packaging.
+
+```sh
+ANDROID_NDK_HOME=/path/to/android-sdk/ndk/27.2.12479018 scripts/build-native-android.sh
+python3 scripts/test-native-page-alignment.py
+```
+
+Set `NEMOTRON_ENGINE_SOURCE_DIR` to reuse a clean checkout of the pinned commit.
+For a targeted build, append an ABI name to the script command. Release Gradle
+builds always request all four ABIs.
+
+The **Android native ABI checks** workflow builds all four architectures, then
+runs the native loader, JNI export, transcribe API and small GGML CPU probes on
+an Android API 30 emulator for each advertised x86 ABI. For a connected emulator,
+run `scripts/test-native-android-abis.sh` after the native build. These probes do
+not exercise model inference or ARM runtime behavior.
+
+## Rebuilding the Preview JNI bridge
+
+The Preview app packages `app/src/main/jniLibs/arm64-v8a/libnemotron_jni.so`.
+Preview Gradle builds do not compile `nemotron_jni.cpp`; rebuild the library after changing
 that file. `nemotron-jni-build.properties` records the source and binary hashes
 so the Android build can detect a stale binary.
 

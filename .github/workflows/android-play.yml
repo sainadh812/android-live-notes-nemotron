@@ -19,7 +19,7 @@ concurrency:
 jobs:
   build:
     runs-on: ubuntu-24.04
-    timeout-minutes: 35
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
@@ -102,9 +102,17 @@ jobs:
           config.write_text('\n'.join(k + '=' + escape(v) for k, v in values.items()) + '\n')
           config.chmod(0o600)
           PY
+      - name: Install native build tools
+        if: inputs.signed_release == true
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y cmake ninja-build ripgrep
       - name: Build signed Play bundle
         if: inputs.signed_release == true
-        run: ./gradlew :app:lintRelease :app:bundleRelease :app:assembleRelease --no-daemon --console=plain
+        run: |
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" 'ndk;27.2.12479018'
+          PYTHONDONTWRITEBYTECODE=1 python3 scripts/test-native-page-alignment.py
+          ./gradlew :app:lintRelease :app:bundleRelease :app:assembleRelease --no-daemon --console=plain
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: live-notes-preview-apk

@@ -20,9 +20,9 @@ You can also download a model in your browser and use **Settings → Import .ggu
 on its matching model card, then **Use model**. See the
 [download and import instructions](desktop/README.md#speech-model-downloads-and-imports).
 
-Android app in Kotlin for live speech transcription, daily notes, and AI summaries with action items. Supports Android 8+ on arm64 devices.
+Android app in Kotlin for live speech transcription, daily notes, and AI summaries with action items. Supports Android 8+; production bundles include ARM64, ARMv7, x86 and x86_64 native libraries.
 
-[Download Preview 1.2.2 APK](https://github.com/sainadh812/android-live-notes-nemotron/releases/download/v1.2.2-preview-backup/LiveMeetingNotes-1.2.2-preview.apk) · [Play publishing AAB](https://github.com/sainadh812/android-live-notes-nemotron/releases/download/android-v1.2.2-play/LiveMeetingNotes-1.2.2-play.aab) · [Model comparison and validation](SPEECH_MODELS.md)
+[Download Preview 1.2.2 APK](https://github.com/sainadh812/android-live-notes-nemotron/releases/download/v1.2.2-preview-backup/LiveMeetingNotes-1.2.2-preview.apk) · [Play publishing AAB](https://github.com/sainadh812/android-live-notes-nemotron/releases/download/android-v1.2.2-play-all-abis/LiveMeetingNotes-1.2.2-play-all-abis.aab) · [Model comparison and validation](SPEECH_MODELS.md)
 
 - Choose Moonshine Tiny Streaming for English short notes, Nemotron English for longer English sessions, or Nemotron 3.5 for 32 supported language locales. All downloaded models run on the CPU on your phone. See [model choices and evidence](SPEECH_MODELS.md).
 - Android speech is an explicit alternative and the initial choice on a new installation. Its provider may use network recognition; availability depends on the device. Downloads do not change your selected engine.
@@ -52,7 +52,7 @@ Install **1.2.2 Preview over your existing Preview app** using Android's Update 
 
 Backups contain transcripts, daily notes, audio and word timings, names, bookmarks, categories, personal summaries, settings and saved API keys. They are password protected; downloaded models are optional. Files saved in Downloads or Drive remain after uninstalling the app. Keep the backup private and retain its password.
 
-The [Play AAB](https://github.com/sainadh812/android-live-notes-nemotron/releases/download/android-v1.2.2-play/LiveMeetingNotes-1.2.2-play.aab) is for publishing through Play Console, not direct phone installation. For an older production-package sideload installation signed with the same key, the [1.2.2 migration APK](https://github.com/sainadh812/android-live-notes-nemotron/releases/download/android-v1.2.2-play/LiveMeetingNotes-1.2.2-migration.apk) adds backup before moving to the Play Store build. Preview users should use the Preview APK above.
+The [Play AAB](https://github.com/sainadh812/android-live-notes-nemotron/releases/download/android-v1.2.2-play-all-abis/LiveMeetingNotes-1.2.2-play-all-abis.aab) is for publishing through Play Console, not direct phone installation. For an older production-package sideload installation signed with the same key, the [1.2.2 migration APK](https://github.com/sainadh812/android-live-notes-nemotron/releases/download/android-v1.2.2-play/LiveMeetingNotes-1.2.2-migration.apk) adds backup before moving to the Play Store build. Preview users should use the Preview APK above.
 
 ## Delete a recording
 
@@ -74,13 +74,13 @@ The Android app is free. Settings includes four repeatable Google Play support p
 
 For Google Play upload instructions, store listing text, privacy drafts, and release signing, see [the Google Play setup guide](distribution/google-play/README.md).
 
-Install JDK 17 and the Android SDK with platform 36, build tools 35.0.0, and NDK 27.2.12479018. Set `ANDROID_HOME` to your SDK directory, or put `sdk.dir=/path/to/android-sdk` in the ignored `local.properties` file.
+Install JDK 17 and the Android SDK with platform 36, build tools 35.0.0, and NDK 27.2.12479018, plus CMake, Ninja, Git and ripgrep on Linux x86_64. Set `ANDROID_HOME` to your SDK directory, or put `sdk.dir=/path/to/android-sdk` in the ignored `local.properties` file.
 
 ```sh
 ./gradlew :app:testDebugUnitTest :app:lintDebug :app:assembleDebug
 ```
 
-The debug APK is `app/build/outputs/apk/debug/app-debug.apk`. The current Android app version is 1.2.2 (version code 9). Windows users can invoke the same tasks with `gradlew.bat`.
+The debug APK is `app/build/outputs/apk/debug/app-debug.apk`. The current Android app version is 1.2.2 (version code 9). Production native compilation currently uses Linux x86_64; Windows users can use GitHub Actions or build the precompiled ARM64 Preview variant.
 
 For a phone trial alongside an older installation, build with `-PpreviewBuild=true`:
 
@@ -92,7 +92,7 @@ This produces **LiveMeetingNotes Preview** with package `com.sainadh.livenotes.p
 
 Network-specific Gradle proxy settings belong in your personal `~/.gradle/gradle.properties`; the repository does not force a corporate proxy.
 
-The app packages arm64 native libraries. The JNI source and binary hashes are checked before each Android build. After changing C++, rebuild the JNI library using the pinned script described in [native build instructions](app/src/main/cpp/BUILDING.md):
+Production builds automatically compile all five native libraries for all four Android ABIs from pinned sources and include full native debug symbols in release AABs. Preview builds retain the checked-in ARM64 libraries and verify their source/binary hashes. After changing C++, rebuild the Preview JNI library using the pinned script described in [native build instructions](app/src/main/cpp/BUILDING.md):
 
 ```sh
 ANDROID_NDK_HOME=/path/to/android-sdk/ndk/27.2.12479018 ./scripts/build-native-jni.sh
@@ -124,6 +124,6 @@ The native and Kotlin host checks use controlled test doubles and validate the a
 
 ## Validation limits
 
-The JNI update-initialization defect and asynchronous shutdown races have regression coverage. Native library segments support 16 KB pages. Real microphone routing, recognition quality, performance, and background behavior still need validation on a physical phone with a valid model. Models are downloaded separately and are not bundled in the APK. This build targets arm64; an x86 emulator cannot execute the bundled native engine.
+The JNI update-initialization defect and asynchronous shutdown races have regression coverage. Native library segments support 16 KB pages. Real microphone routing, recognition quality, performance, and background behavior still need validation on a physical phone with a valid model. Models are downloaded separately and are not bundled in the APK. The Preview APK targets ARM64. Production builds also contain ARMv7, x86 and x86_64 engines; instrumented UI builds deliberately exclude native libraries.
 
 See [transcription reliability changes](TRANSCRIPTION_RELIABILITY.md) for capture buffering, retry recovery, storage migration, and remaining limits.
