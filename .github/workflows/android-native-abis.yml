@@ -37,7 +37,7 @@ jobs:
       - name: Install pinned native and emulator tools
         run: |
           sudo apt-get update -qq
-          sudo apt-get install -y --no-install-recommends cmake ninja-build ripgrep
+          sudo apt-get install -y --no-install-recommends cmake ninja-build ripgrep libpulse0
           export ANDROID_HOME="${ANDROID_HOME:-/usr/local/lib/android/sdk}"
           export PATH="$ANDROID_HOME/cmdline-tools/latest/bin:$ANDROID_HOME/platform-tools:$PATH"
           echo "$ANDROID_HOME/platform-tools" >> "$GITHUB_PATH"
@@ -46,6 +46,14 @@ jobs:
           echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/27.2.12479018" >> "$GITHUB_ENV"
           sdkmanager 'ndk;27.2.12479018' 'platform-tools' 'emulator' 'system-images;android-30;default;x86_64'
           mkdir -p native-evidence
+          # The QEMU binary links PulseAudio even with -no-audio. Include the
+          # emulator's bundled search paths when checking other runtime dependencies.
+          env LD_LIBRARY_PATH="$ANDROID_HOME/emulator/lib64:$ANDROID_HOME/emulator/lib64/qt/lib:$ANDROID_HOME/emulator/lib64/gles_swiftshader" \
+            ldd "$ANDROID_HOME/emulator/qemu/linux-x86_64/qemu-system-x86_64" > native-evidence/emulator-libraries.txt
+          if rg -q '=> not found' native-evidence/emulator-libraries.txt; then
+            cat native-evidence/emulator-libraries.txt
+            exit 1
+          fi
           "$ANDROID_HOME/emulator/emulator" -version > native-evidence/emulator-version.txt 2>&1
           sdkmanager --list_installed > native-evidence/sdk-packages.txt
       - name: Test ELF validation on the host
