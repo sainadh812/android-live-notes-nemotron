@@ -5,7 +5,8 @@ import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.captureToImage
 import androidx.compose.ui.test.hasClickAction
 import androidx.compose.ui.test.hasContentDescription
-import androidx.compose.ui.test.hasScrollAction
+import androidx.compose.ui.semantics.SemanticsActions
+import androidx.compose.ui.test.SemanticsMatcher
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.isEnabled
 import androidx.compose.ui.test.junit4.createEmptyComposeRule
@@ -37,6 +38,8 @@ import java.util.UUID
 @RunWith(AndroidJUnit4::class)
 class NoteOrganizationFlowTest {
     @get:Rule val compose = createEmptyComposeRule()
+    private val lazyList = SemanticsMatcher.keyIsDefined(SemanticsActions.ScrollToIndex)
+    private val readOnlyText = SemanticsMatcher.keyNotDefined(SemanticsActions.SetText)
 
     @Test fun organizeAnExistingRecordingAndReopenItWithoutLosingItsTranscript() {
         val application = ApplicationProvider.getApplicationContext<LiveNotesApplication>()
@@ -63,7 +66,7 @@ class NoteOrganizationFlowTest {
             compose.waitUntil(10_000) {
                 compose.onAllNodesWithText("Recordings · 1").fetchSemanticsNodes().isNotEmpty()
             }
-            compose.onNode(hasScrollAction()).performScrollToNode(hasText("Edit details"))
+            compose.onNode(lazyList).performScrollToNode(hasText("Edit details"))
             compose.waitUntil(10_000) {
                 compose.onAllNodes(hasText("Edit details") and isEnabled()).fetchSemanticsNodes().isNotEmpty()
             }
@@ -78,31 +81,31 @@ class NoteOrganizationFlowTest {
             }
 
             // The renamed note no longer matches the old title. Find it using its new name.
-            compose.onNode(hasScrollAction()).performScrollToNode(hasText("Search notes"))
+            compose.onNode(lazyList).performScrollToNode(hasText("Search notes"))
             compose.onNodeWithText("Search notes").performTextReplacement(editedTitle)
             compose.waitUntil(10_000) {
                 compose.onAllNodesWithText("Recordings · 1").fetchSemanticsNodes().isNotEmpty()
             }
-            compose.onNode(hasScrollAction()).performScrollToNode(hasContentDescription("Bookmark note"))
+            compose.onNode(lazyList).performScrollToNode(hasContentDescription("Bookmark note"))
             compose.onNode(hasContentDescription("Bookmark note")).performClick()
             compose.waitUntil(10_000) {
                 compose.onAllNodesWithText("Bookmarked ✓").fetchSemanticsNodes().isNotEmpty()
             }
-            compose.onNode(hasScrollAction()).performScrollToNode(hasText("Bookmarked"))
+            compose.onNode(lazyList).performScrollToNode(hasText("Bookmarked"))
             compose.onNodeWithText("Bookmarked").performClick()
-            compose.onNodeWithText("All categories").performClick()
+            compose.onNodeWithText("All categories").performScrollTo().performClick()
             compose.onNode(hasText(category.name) and hasClickAction()).performClick()
-            compose.onNode(hasScrollAction()).performScrollToNode(hasText(editedTitle))
-            compose.onNodeWithText(editedTitle).assertIsDisplayed()
-            compose.onNode(hasScrollAction()).performScrollToNode(hasText("Open recording"))
+            compose.onNode(lazyList).performScrollToNode(hasText(editedTitle) and readOnlyText)
+            compose.onNode(hasText(editedTitle) and readOnlyText).assertIsDisplayed()
+            compose.onNode(lazyList).performScrollToNode(hasText("Open recording"))
             compose.onNodeWithText("Open recording").performClick()
 
             activity.recreate()
-            compose.onNodeWithText(editedTitle).assertIsDisplayed()
-            compose.onNode(hasScrollAction()).performScrollToNode(hasText(pastedSummary))
+            compose.onNode(hasText(editedTitle) and readOnlyText).assertIsDisplayed()
+            compose.onNode(lazyList).performScrollToNode(hasText(pastedSummary))
             compose.onNodeWithText(pastedSummary).assertIsDisplayed()
             saveTestScreenshot(compose.onRoot().captureToImage().asAndroidBitmap(), "note-organization.png")
-            compose.onNode(hasScrollAction()).performScrollToNode(hasText(transcript))
+            compose.onNode(lazyList).performScrollToNode(hasText(transcript))
             compose.onNodeWithText(transcript).assertIsDisplayed()
 
             runBlocking {
