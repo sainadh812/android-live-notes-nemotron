@@ -1,0 +1,52 @@
+{
+  "synthetic": true,
+  "description": "Three short authored source turns for end-to-end pipeline verification, not a long-meeting quality benchmark.",
+  "nominal_duration_seconds": 180,
+  "word_count": 43,
+  "sha256": "4f54390122a30209df23123796f23e1d135003ca74d37e2adc075822a4f7a7d7",
+  "evaluation_limit": "Selected lexical/source presence checks only; human semantic review required.",
+  "facts": [
+    {
+      "id": "corrected_pilot_date",
+      "any_text": [
+        "november 19"
+      ],
+      "required_sources": [
+        "S0002"
+      ]
+    },
+    {
+      "id": "corrected_budget",
+      "any_text": [
+        "95,000",
+        "95000",
+        "95k"
+      ],
+      "required_sources": [
+        "S0002"
+      ]
+    },
+    {
+      "id": "explicit_risk_register_action",
+      "any_text": [
+        "risk register"
+      ],
+      "required_sources": [
+        "S0003"
+      ]
+    },
+    {
+      "id": "unassigned_support",
+      "any_text": [
+        "support"
+      ],
+      "required_sources": [
+        "S0003"
+      ]
+    }
+  ],
+  "source_truth": {
+    "S0002": "Final decision: November 19 replaces November 12. Approved budget is $95,000, replacing $120,000.",
+    "S0003": "Priya will update the risk register by October 9. Support ownership is unassigned."
+  }
+}

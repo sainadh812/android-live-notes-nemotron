@@ -1,0 +1,61 @@
+{
+  "status": "completed",
+  "synthetic": true,
+  "phone_benchmark": false,
+  "test_scope": "Short real-inference smoke only; not the 125-minute pipeline",
+  "host": "Linux-6.8.0-1066-gcp-x86_64-with-glibc2.35",
+  "model_sha256": "0b2a8980ce155fd97673d8e820b4d29d9c7d99b8fa6806f425d969b145bd52e0",
+  "runtime": "litert-lm-api 0.17.1",
+  "backend": "CPU",
+  "threads": 4,
+  "context": 2048,
+  "max_output_tokens": 256,
+  "thinking_budget_when_enabled": 64,
+  "system": "Summarize these meeting facts in at most 90 words. Preserve explicit corrections, action owners and deadlines. Keep unknown ownership unassigned. Do not invent facts.",
+  "input": "[S0001] Orion pilot was provisionally November 12, with a proposed $120,000 budget.\n[S0002] Final decision: November 19 replaces November 12. Approved budget is $95,000, replacing $120,000.\n[S0003] Priya will update the risk register by October 9. Support ownership is unassigned.",
+  "calls": [
+    {
+      "thinking": false,
+      "status": "completed",
+      "text": "The Orion pilot date was provisionally November 12 with a $120,000 budget. This was corrected; the final decision is November 19, with an approved budget of $95,000. Priya will update the risk register by October 9. Support ownership remains unassigned.",
+      "thinking_characters": 0,
+      "native_benchmark": {
+        "init_time_in_second": 28.040724878000002,
+        "time_to_first_token_in_second": 10.107760621250002,
+        "last_prefill_token_count": 144,
+        "last_prefill_tokens_per_second": 14.563596271694232,
+        "last_decode_token_count": 67,
+        "last_decode_tokens_per_second": 4.543534850811368
+      },
+      "wall_seconds": 24.64,
+      "peak_process_rss_kib": 10452144
+    },
+    {
+      "thinking": true,
+      "status": "completed",
+      "text": "The Orion pilot date was corrected from November 12 to November 19. The budget was also revised from $120,000 to $95,000. Priya is responsible for updating the risk register by October 9. Support ownership remains unassigned.",
+      "thinking_characters": 263,
+      "native_benchmark": {
+        "init_time_in_second": 28.040697939,
+        "time_to_first_token_in_second": 8.04740631925,
+        "last_prefill_token_count": 145,
+        "last_prefill_tokens_per_second": 18.358946724795565,
+        "last_decode_token_count": 128,
+        "last_decode_tokens_per_second": 6.695693010248761
+      },
+      "wall_seconds": 27.02,
+      "peak_process_rss_kib": 10481200
+    }
+  ],
+  "initialization_seconds": 13.998,
+  "input_tokens_without_template": 130,
+  "elapsed_seconds": 80.147,
+  "peak_process_rss_kib": 10481200,
+  "evidence_export": {
+    "synthetic_input_only": true,
+    "local_absolute_paths_replaced": true,
+    "actual_model_answers_preserved": true,
+    "pinned_equivalent_artifact_url": "https://huggingface.co/litert-community/gemma-4-E4B-it-litert-lm/resolve/2eee7ac325f20eb8c9ac1d0e972f7c84663062da/gemma-4-E4B-it.litertlm",
+    "original_model_url_preserved_if_present": true
+  }
+}

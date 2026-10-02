@@ -1,0 +1,637 @@
+{
+  "status": "completed",
+  "test_host": "Linux-6.8.0-1066-gcp-x86_64-with-glibc2.35",
+  "machine": "x86_64",
+  "phone_benchmark": false,
+  "cpu_count": 4,
+  "model_sha256": "0b2a8980ce155fd97673d8e820b4d29d9c7d99b8fa6806f425d969b145bd52e0",
+  "model_bytes": 3659530240,
+  "model_url": "https://huggingface.co/litert-community/gemma-4-E4B-it-litert-lm/resolve/main/gemma-4-E4B-it.litertlm",
+  "configuration": {
+    "model": "<benchmark-output>/model/gemma-4-E4B-it.litertlm",
+    "transcript": "scripts/gemma-prototype/fixtures/synthetic-short-meeting.txt",
+    "expected": "scripts/gemma-prototype/fixtures/synthetic-short-meeting.expected.json",
+    "output": "<benchmark-output>/short-pipeline-cached-4096",
+    "context": 4096,
+    "output_tokens": 1024,
+    "thinking_tokens": 256,
+    "template_reserve": 256,
+    "threads": 4,
+    "budget": "android-bytes",
+    "overlap": true,
+    "compare_thinking": true,
+    "python_pipeline": false,
+    "runtime_cache": "<benchmark-output>/cpu-cache"
+  },
+  "runtime": "litert-lm-api 0.17.1",
+  "backend": "CPU",
+  "prompt_version": "local-evidence-v2",
+  "transcript_sha256": "4f54390122a30209df23123796f23e1d135003ca74d37e2adc075822a4f7a7d7",
+  "transcript_word_count": 43,
+  "fixture": {
+    "synthetic": true,
+    "description": "Three short authored source turns for end-to-end pipeline verification, not a long-meeting quality benchmark.",
+    "nominal_duration_seconds": 180,
+    "word_count": 43,
+    "sha256": "4f54390122a30209df23123796f23e1d135003ca74d37e2adc075822a4f7a7d7",
+    "evaluation_limit": "Selected lexical/source presence checks only; human semantic review required.",
+    "facts": [
+      {
+        "id": "corrected_pilot_date",
+        "any_text": [
+          "november 19"
+        ],
+        "required_sources": [
+          "S0002"
+        ]
+      },
+      {
+        "id": "corrected_budget",
+        "any_text": [
+          "95,000",
+          "95000",
+          "95k"
+        ],
+        "required_sources": [
+          "S0002"
+        ]
+      },
+      {
+        "id": "explicit_risk_register_action",
+        "any_text": [
+          "risk register"
+        ],
+        "required_sources": [
+          "S0003"
+        ]
+      },
+      {
+        "id": "unassigned_support",
+        "any_text": [
+          "support"
+        ],
+        "required_sources": [
+          "S0003"
+        ]
+      }
+    ],
+    "source_truth": {
+      "S0002": "Final decision: November 19 replaces November 12. Approved budget is $95,000, replacing $120,000.",
+      "S0003": "Priya will update the risk register by October 9. Support ownership is unassigned."
+    }
+  },
+  "model_initialization_seconds": 0.832,
+  "transcript_measured_tokens": 113,
+  "pipeline_implementation": "actual shared Android Java core via host JVM; actual LiteRT Linux CPU generation",
+  "source_spans": [
+    {
+      "id": "S0001",
+      "text": "[00:00:00] Priya: Orion pilot was provisionally November 12, with a proposed $120,000 budget.",
+      "timestamp": "00:00:00",
+      "startOffset": 0,
+      "endOffset": 94
+    },
+    {
+      "id": "S0002",
+      "text": "[00:01:00] Nora: Final decision: November 19 replaces November 12.",
+      "timestamp": "00:01:00",
+      "startOffset": 94,
+      "endOffset": 161
+    },
+    {
+      "id": "S0003",
+      "text": "Approved budget is $95,000, replacing $120,000.",
+      "timestamp": "00:01:00",
+      "startOffset": 161,
+      "endOffset": 209
+    },
+    {
+      "id": "S0004",
+      "text": "[00:02:00] Priya: Priya will update the risk register by October 9.",
+      "timestamp": "00:02:00",
+      "startOffset": 209,
+      "endOffset": 277
+    },
+    {
+      "id": "S0005",
+      "text": "Support ownership is unassigned.",
+      "timestamp": "00:02:00",
+      "startOffset": 277,
+      "endOffset": 310
+    }
+  ],
+  "java_runs": {
+    "thinking_off": {
+      "markdown": "## Summary\n\n- The Orion pilot was provisionally scheduled for November 12 with a proposed budget of $120,000. [S0001 @ 00:00:00]\n- Support ownership for the project is currently unassigned. [S0005 @ 00:02:00]\n\n## Decisions\n\n- The final decision for the Orion pilot date is November 19, replacing November 12. [S0002 @ 00:01:00]\n- The approved budget is $95,000, replacing the previously proposed $120,000. [S0003 @ 00:01:00]\n\n## Action items\n\n- Priya will update the risk register by October 9. [S0004 @ 00:02:00]\n\n",
+      "sources": [
+        {
+          "id": "S0001",
+          "text": "[00:00:00] Priya: Orion pilot was provisionally November 12, with a proposed $120,000 budget.",
+          "timestamp": "00:00:00",
+          "startOffset": 0,
+          "endOffset": 94
+        },
+        {
+          "id": "S0002",
+          "text": "[00:01:00] Nora: Final decision: November 19 replaces November 12.",
+          "timestamp": "00:01:00",
+          "startOffset": 94,
+          "endOffset": 161
+        },
+        {
+          "id": "S0003",
+          "text": "Approved budget is $95,000, replacing $120,000.",
+          "timestamp": "00:01:00",
+          "startOffset": 161,
+          "endOffset": 209
+        },
+        {
+          "id": "S0004",
+          "text": "[00:02:00] Priya: Priya will update the risk register by October 9.",
+          "timestamp": "00:02:00",
+          "startOffset": 209,
+          "endOffset": 277
+        },
+        {
+          "id": "S0005",
+          "text": "Support ownership is unassigned.",
+          "timestamp": "00:02:00",
+          "startOffset": 277,
+          "endOffset": 310
+        }
+      ],
+      "items": [
+        {
+          "kind": "fact",
+          "text": "The Orion pilot was provisionally scheduled for November 12 with a proposed budget of $120,000.",
+          "sources": [
+            "S0001"
+          ]
+        },
+        {
+          "kind": "decision",
+          "text": "The final decision for the Orion pilot date is November 19, replacing November 12.",
+          "sources": [
+            "S0002"
+          ]
+        },
+        {
+          "kind": "decision",
+          "text": "The approved budget is $95,000, replacing the previously proposed $120,000.",
+          "sources": [
+            "S0003"
+          ]
+        },
+        {
+          "kind": "action",
+          "text": "Priya will update the risk register by October 9.",
+          "sources": [
+            "S0004"
+          ]
+        },
+        {
+          "kind": "fact",
+          "text": "Support ownership for the project is currently unassigned.",
+          "sources": [
+            "S0005"
+          ]
+        }
+      ],
+      "transcriptSha256": "4f54390122a30209df23123796f23e1d135003ca74d37e2adc075822a4f7a7d7",
+      "checkpointDirectory": "<benchmark-output>/short-pipeline-cached-4096/java-checkpoints/add7f6e390f101d79b176f19ebd271397279193cdc115d22fe6d945ec9a87c8f",
+      "budgetDescription": "Conservative UTF-8 byte bound; not a measured token count",
+      "generatedCalls": 2,
+      "cacheHits": 0,
+      "chunkCount": 1,
+      "finalThinking": false
+    },
+    "thinking_on": {
+      "markdown": "## Summary\n\n- Support ownership for the project is currently unassigned. [S0005 @ 00:02:00]\n\n## Decisions\n\n- The Orion pilot date has been finalized for November 19, replacing the provisional date of November 12. [S0002 @ 00:01:00]\n- The approved budget for the Orion pilot is $95,000, which replaces the previously proposed $120,000. [S0003 @ 00:01:00]\n\n## Action items\n\n- Priya is tasked with updating the risk register by October 9. [S0004 @ 00:02:00]\n\n",
+      "sources": [
+        {
+          "id": "S0001",
+          "text": "[00:00:00] Priya: Orion pilot was provisionally November 12, with a proposed $120,000 budget.",
+          "timestamp": "00:00:00",
+          "startOffset": 0,
+          "endOffset": 94
+        },
+        {
+          "id": "S0002",
+          "text": "[00:01:00] Nora: Final decision: November 19 replaces November 12.",
+          "timestamp": "00:01:00",
+          "startOffset": 94,
+          "endOffset": 161
+        },
+        {
+          "id": "S0003",
+          "text": "Approved budget is $95,000, replacing $120,000.",
+          "timestamp": "00:01:00",
+          "startOffset": 161,
+          "endOffset": 209
+        },
+        {
+          "id": "S0004",
+          "text": "[00:02:00] Priya: Priya will update the risk register by October 9.",
+          "timestamp": "00:02:00",
+          "startOffset": 209,
+          "endOffset": 277
+        },
+        {
+          "id": "S0005",
+          "text": "Support ownership is unassigned.",
+          "timestamp": "00:02:00",
+          "startOffset": 277,
+          "endOffset": 310
+        }
+      ],
+      "items": [
+        {
+          "kind": "decision",
+          "text": "The Orion pilot date has been finalized for November 19, replacing the provisional date of November 12.",
+          "sources": [
+            "S0002"
+          ]
+        },
+        {
+          "kind": "decision",
+          "text": "The approved budget for the Orion pilot is $95,000, which replaces the previously proposed $120,000.",
+          "sources": [
+            "S0003"
+          ]
+        },
+        {
+          "kind": "action",
+          "text": "Priya is tasked with updating the risk register by October 9.",
+          "sources": [
+            "S0004"
+          ]
+        },
+        {
+          "kind": "fact",
+          "text": "Support ownership for the project is currently unassigned.",
+          "sources": [
+            "S0005"
+          ]
+        }
+      ],
+      "transcriptSha256": "4f54390122a30209df23123796f23e1d135003ca74d37e2adc075822a4f7a7d7",
+      "checkpointDirectory": "<benchmark-output>/short-pipeline-cached-4096/java-checkpoints/add7f6e390f101d79b176f19ebd271397279193cdc115d22fe6d945ec9a87c8f",
+      "budgetDescription": "Conservative UTF-8 byte bound; not a measured token count",
+      "generatedCalls": 1,
+      "cacheHits": 1,
+      "chunkCount": 1,
+      "finalThinking": true
+    }
+  },
+  "finals": {
+    "thinking_off": {
+      "items": [
+        {
+          "kind": "fact",
+          "text": "The Orion pilot was provisionally scheduled for November 12 with a proposed budget of $120,000.",
+          "sources": [
+            "S0001"
+          ]
+        },
+        {
+          "kind": "decision",
+          "text": "The final decision for the Orion pilot date is November 19, replacing November 12.",
+          "sources": [
+            "S0002"
+          ]
+        },
+        {
+          "kind": "decision",
+          "text": "The approved budget is $95,000, replacing the previously proposed $120,000.",
+          "sources": [
+            "S0003"
+          ]
+        },
+        {
+          "kind": "action",
+          "text": "Priya will update the risk register by October 9.",
+          "sources": [
+            "S0004"
+          ]
+        },
+        {
+          "kind": "fact",
+          "text": "Support ownership for the project is currently unassigned.",
+          "sources": [
+            "S0005"
+          ]
+        }
+      ]
+    },
+    "thinking_on": {
+      "items": [
+        {
+          "kind": "decision",
+          "text": "The Orion pilot date has been finalized for November 19, replacing the provisional date of November 12.",
+          "sources": [
+            "S0002"
+          ]
+        },
+        {
+          "kind": "decision",
+          "text": "The approved budget for the Orion pilot is $95,000, which replaces the previously proposed $120,000.",
+          "sources": [
+            "S0003"
+          ]
+        },
+        {
+          "kind": "action",
+          "text": "Priya is tasked with updating the risk register by October 9.",
+          "sources": [
+            "S0004"
+          ]
+        },
+        {
+          "kind": "fact",
+          "text": "Support ownership for the project is currently unassigned.",
+          "sources": [
+            "S0005"
+          ]
+        }
+      ]
+    }
+  },
+  "map_chunks": 1,
+  "selected_fact_checks": {
+    "thinking_off": {
+      "scope": "Selected lexical/source presence checks only; human semantic review required.",
+      "selected_facts_present": 4,
+      "selected_facts_total": 4,
+      "checks": [
+        {
+          "id": "corrected_pilot_date",
+          "selected_fact_and_source_present": true,
+          "matching_items": [
+            {
+              "kind": "decision",
+              "text": "The final decision for the Orion pilot date is November 19, replacing November 12.",
+              "sources": [
+                "S0002"
+              ]
+            }
+          ]
+        },
+        {
+          "id": "corrected_budget",
+          "selected_fact_and_source_present": true,
+          "matching_items": [
+            {
+              "kind": "decision",
+              "text": "The approved budget is $95,000, replacing the previously proposed $120,000.",
+              "sources": [
+                "S0003"
+              ]
+            }
+          ]
+        },
+        {
+          "id": "explicit_risk_register_action",
+          "selected_fact_and_source_present": true,
+          "matching_items": [
+            {
+              "kind": "action",
+              "text": "Priya will update the risk register by October 9.",
+              "sources": [
+                "S0004"
+              ]
+            }
+          ]
+        },
+        {
+          "id": "unassigned_support",
+          "selected_fact_and_source_present": true,
+          "matching_items": [
+            {
+              "kind": "fact",
+              "text": "Support ownership for the project is currently unassigned.",
+              "sources": [
+                "S0005"
+              ]
+            }
+          ]
+        }
+      ],
+      "human_review_required": [
+        "Corrected values are current, obsolete values are not current decisions.",
+        "Support and invoice ownership remain unassigned.",
+        "Public launch is not approved; copied email instructions are ignored.",
+        "Cited source content actually entails each statement.",
+        "Important content is not lost during merging."
+      ]
+    },
+    "thinking_on": {
+      "scope": "Selected lexical/source presence checks only; human semantic review required.",
+      "selected_facts_present": 4,
+      "selected_facts_total": 4,
+      "checks": [
+        {
+          "id": "corrected_pilot_date",
+          "selected_fact_and_source_present": true,
+          "matching_items": [
+            {
+              "kind": "decision",
+              "text": "The Orion pilot date has been finalized for November 19, replacing the provisional date of November 12.",
+              "sources": [
+                "S0002"
+              ]
+            }
+          ]
+        },
+        {
+          "id": "corrected_budget",
+          "selected_fact_and_source_present": true,
+          "matching_items": [
+            {
+              "kind": "decision",
+              "text": "The approved budget for the Orion pilot is $95,000, which replaces the previously proposed $120,000.",
+              "sources": [
+                "S0003"
+              ]
+            }
+          ]
+        },
+        {
+          "id": "explicit_risk_register_action",
+          "selected_fact_and_source_present": true,
+          "matching_items": [
+            {
+              "kind": "action",
+              "text": "Priya is tasked with updating the risk register by October 9.",
+              "sources": [
+                "S0004"
+              ]
+            }
+          ]
+        },
+        {
+          "id": "unassigned_support",
+          "selected_fact_and_source_present": true,
+          "matching_items": [
+            {
+              "kind": "fact",
+              "text": "Support ownership for the project is currently unassigned.",
+              "sources": [
+                "S0005"
+              ]
+            }
+          ]
+        }
+      ],
+      "human_review_required": [
+        "Corrected values are current, obsolete values are not current decisions.",
+        "Support and invoice ownership remain unassigned.",
+        "Public launch is not approved; copied email instructions are ignored.",
+        "Cited source content actually entails each statement.",
+        "Important content is not lost during merging."
+      ]
+    }
+  },
+  "elapsed_seconds_this_invocation": 265.128,
+  "peak_process_rss_kib": 4591392,
+  "calls": [
+    {
+      "name": "java-bd121f4ac09aac31",
+      "fingerprint": "b68970cbf6f808a0c8201b13320f9004d1b7fbea01030dd1c5f73fa8873eda46",
+      "model_sha256": "0b2a8980ce155fd97673d8e820b4d29d9c7d99b8fa6806f425d969b145bd52e0",
+      "runtime": "0.17.1",
+      "prompt_version": "local-evidence-v2",
+      "thinking": false,
+      "thinking_tokens": 0,
+      "max_output_tokens": 1024,
+      "context": 4096,
+      "backend": "CPU",
+      "threads": 4,
+      "temperature": 0.0,
+      "seed": 0,
+      "top_k": 1,
+      "top_p": 1.0,
+      "speculative_decoding": false,
+      "runtime_cache": "<benchmark-output>/cpu-cache",
+      "status": "ok",
+      "reused_saved_real_inference": false,
+      "input_tokens_without_chat_template": 436,
+      "budget_method": "android-bytes",
+      "template_reserve_tokens": 256,
+      "input_source_ids": [
+        "S0001",
+        "S0002",
+        "S0003",
+        "S0004",
+        "S0005"
+      ],
+      "thinking_characters": 0,
+      "kv_token_count": 749,
+      "native_benchmark": {
+        "init_time_in_second": 1.707749582,
+        "time_to_first_token_in_second": 17.727529106250003,
+        "last_prefill_token_count": 448,
+        "last_prefill_tokens_per_second": 25.53990582459137,
+        "last_decode_token_count": 301,
+        "last_decode_tokens_per_second": 5.3661759215465095
+      },
+      "schema_valid": true,
+      "wall_seconds": 73.641,
+      "peak_process_rss_kib": 4517152
+    },
+    {
+      "name": "java-4ea6425ec5a91996",
+      "fingerprint": "90ffdfa1af5d0876fdb7315f4ac8b5827c7211d04c47542320610a6ec044d8e7",
+      "model_sha256": "0b2a8980ce155fd97673d8e820b4d29d9c7d99b8fa6806f425d969b145bd52e0",
+      "runtime": "0.17.1",
+      "prompt_version": "local-evidence-v2",
+      "thinking": false,
+      "thinking_tokens": 0,
+      "max_output_tokens": 1024,
+      "context": 4096,
+      "backend": "CPU",
+      "threads": 4,
+      "temperature": 0.0,
+      "seed": 0,
+      "top_k": 1,
+      "top_p": 1.0,
+      "speculative_decoding": false,
+      "runtime_cache": "<benchmark-output>/cpu-cache",
+      "status": "ok",
+      "reused_saved_real_inference": false,
+      "input_tokens_without_chat_template": 351,
+      "budget_method": "android-bytes",
+      "template_reserve_tokens": 256,
+      "input_source_ids": [
+        "S0001",
+        "S0002",
+        "S0003",
+        "S0004",
+        "S0005"
+      ],
+      "thinking_characters": 0,
+      "kv_token_count": 665,
+      "native_benchmark": {
+        "init_time_in_second": 1.707810054,
+        "time_to_first_token_in_second": 13.393032521,
+        "last_prefill_token_count": 364,
+        "last_prefill_tokens_per_second": 27.538835432927584,
+        "last_decode_token_count": 301,
+        "last_decode_tokens_per_second": 5.703371573642084
+      },
+      "schema_valid": true,
+      "wall_seconds": 66.002,
+      "peak_process_rss_kib": 4546592
+    },
+    {
+      "name": "java-27750c73b4a24c9c",
+      "fingerprint": "4f899f04471a2483f81d917542d118909c321131050a92e95b482fa0a57157a6",
+      "model_sha256": "0b2a8980ce155fd97673d8e820b4d29d9c7d99b8fa6806f425d969b145bd52e0",
+      "runtime": "0.17.1",
+      "prompt_version": "local-evidence-v2",
+      "thinking": true,
+      "thinking_tokens": 256,
+      "max_output_tokens": 1024,
+      "context": 4096,
+      "backend": "CPU",
+      "threads": 4,
+      "temperature": 0.0,
+      "seed": 0,
+      "top_k": 1,
+      "top_p": 1.0,
+      "speculative_decoding": false,
+      "runtime_cache": "<benchmark-output>/cpu-cache",
+      "status": "ok",
+      "reused_saved_real_inference": false,
+      "input_tokens_without_chat_template": 351,
+      "budget_method": "android-bytes",
+      "template_reserve_tokens": 256,
+      "input_source_ids": [
+        "S0001",
+        "S0002",
+        "S0003",
+        "S0004",
+        "S0005"
+      ],
+      "thinking_characters": 946,
+      "kv_token_count": 872,
+      "native_benchmark": {
+        "init_time_in_second": 1.707722912,
+        "time_to_first_token_in_second": 12.8902512025,
+        "last_prefill_token_count": 365,
+        "last_prefill_tokens_per_second": 28.713870122136655,
+        "last_decode_token_count": 507,
+        "last_decode_tokens_per_second": 5.598338161606554
+      },
+      "schema_valid": true,
+      "wall_seconds": 103.282,
+      "peak_process_rss_kib": 4591392
+    }
+  ],
+  "evidence_export": {
+    "synthetic_input_only": true,
+    "local_absolute_paths_replaced": true,
+    "actual_model_answers_preserved": true,
+    "pinned_equivalent_artifact_url": "https://huggingface.co/litert-community/gemma-4-E4B-it-litert-lm/resolve/2eee7ac325f20eb8c9ac1d0e972f7c84663062da/gemma-4-E4B-it.litertlm",
+    "original_model_url_preserved_if_present": true
+  }
+}
