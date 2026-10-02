@@ -16,3 +16,4 @@ dependencyResolutionManagement {
 
 rootProject.name = "LiveMeetingNotes"
 include(":app")
+include(":gemma-prototype")
