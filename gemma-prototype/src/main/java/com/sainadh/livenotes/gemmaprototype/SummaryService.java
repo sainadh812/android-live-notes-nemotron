@@ -31,6 +31,9 @@ public final class SummaryService extends Service {
     public static boolean isBusy() { return BUSY.get(); }
     public static String getStatus() { return status; }
     public static String getSummary() { return summary; }
+    public static void restoreInterruptedStatus() {
+        if (!BUSY.get()) status = "Previous test was interrupted. Summarize / resume continues saved sections.";
+    }
     public static File transcriptFile(Context c) { return new File(c.getFilesDir(), "transcript.txt"); }
     public static File reportFile(Context c) { return new File(c.getFilesDir(), "last-report.json"); }
     public static File summaryFile(Context c) { return new File(c.getFilesDir(), "last-summary.md"); }
@@ -100,6 +103,9 @@ public final class SummaryService extends Service {
                     report.put("reasoningForFinalSummary", thinking);
                     report.put("requestedBackend", cpu ? "CPU" : "GPU");
                     report.put("transcriptCharacters", transcript.length());
+                    report.put("status", "running");
+                    report.put("stage", "Verifying and loading model");
+                    saveReport(report);
                     File model = store.requireVerifiedModel(cancel, progress);
                     engine = LiteRtTextEngine.load(model, new File(getCacheDir(), "litert"),
                         cpu ? LiteRtTextEngine.BackendPreference.CPU : LiteRtTextEngine.BackendPreference.GPU,
@@ -113,9 +119,20 @@ public final class SummaryService extends Service {
                     options.maxOutputTokens = 2048;
                     options.thinking = thinking;
                     report.put("options", options);
+                    report.put("speculativeDecoding", false);
+                    report.put("sampling", "greedy; topK=1; topP=1; temperature=0; seed=0");
+                    saveReport(report);
                     SummaryPipeline.Result result = new SummaryPipeline().run(transcript,
                         new File(getFilesDir(), "checkpoints"), options, engine, cancel,
-                        (stage, done, total, cached) -> update(stage + " " + done + "/" + total + (cached ? " · resumed" : "")));
+                        (stage, done, total, cached) -> {
+                            update(stage + " " + done + "/" + total + (cached ? " · resumed" : ""));
+                            report.put("stage", stage);
+                            report.put("completedInStage", done);
+                            report.put("totalInStage", total);
+                            report.put("peakSampledProcessPssKiB", peakPssKiB.get());
+                            report.put("generations", engine.getGenerationStats());
+                            saveReport(report);
+                        });
                     summary = result.markdown;
                     LocalFiles.write(summaryFile(this), summary);
                     report.put("result", result);
@@ -143,9 +160,7 @@ public final class SummaryService extends Service {
                 if (Build.VERSION.SDK_INT >= 29) report.put("thermalStatusAfter", getSystemService(PowerManager.class).getCurrentThermalStatus());
                 report.put("totalElapsedMillis", SystemClock.elapsedRealtime() - started);
                 if (RUN.equals(action)) {
-                    try { LocalFiles.write(reportFile(this), new GsonBuilder().setPrettyPrinting()
-                        .create().toJson(report)); }
-                    catch (Exception e) { update(status + " Report could not be saved."); }
+                    saveReport(report);
                 }
                 new Handler(Looper.getMainLooper()).post(() -> {
                     if (wakeLock.isHeld()) wakeLock.release();
@@ -156,6 +171,11 @@ public final class SummaryService extends Service {
             }
         });
         return START_NOT_STICKY;
+    }
+
+    private void saveReport(Map<String, Object> report) {
+        try { LocalFiles.write(reportFile(this), new GsonBuilder().setPrettyPrinting().create().toJson(report)); }
+        catch (IOException error) { update(status + " Test report could not be saved."); }
     }
 
     private void update(String message) {

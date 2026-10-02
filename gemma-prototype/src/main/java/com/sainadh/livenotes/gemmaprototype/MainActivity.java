@@ -125,6 +125,12 @@ public final class MainActivity extends Activity {
             try {
                 String saved = readFile(SummaryService.transcriptFile(this));
                 String oldSummary = readFile(SummaryService.summaryFile(this));
+                String oldReport = readFile(SummaryService.reportFile(this));
+                if (!oldReport.isEmpty()) {
+                    JsonObject savedReport = JsonParser.parseString(oldReport).getAsJsonObject();
+                    if (savedReport.has("status") && "running".equals(savedReport.get("status").getAsString()))
+                        SummaryService.restoreInterruptedStatus();
+                }
                 runOnUiThread(() -> {
                     setTranscript(saved,getPreferences(0).getBoolean("synthetic",false));
                     if (!oldSummary.isEmpty() && SummaryService.getSummary().isEmpty()) {

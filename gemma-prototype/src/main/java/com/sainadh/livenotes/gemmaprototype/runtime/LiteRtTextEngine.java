@@ -103,6 +103,8 @@ public final class LiteRtTextEngine implements TextEngine, AutoCloseable {
         }
         cancel.throwIfCancelled();
         ExperimentalFlags.INSTANCE.setEnableBenchmark(true);
+        // Match the host prototype baseline; model defaults can otherwise enable a different path.
+        ExperimentalFlags.INSTANCE.setEnableSpeculativeDecoding(false);
         long started = System.nanoTime();
         String actualBackend = requested.name();
         Engine engine;
