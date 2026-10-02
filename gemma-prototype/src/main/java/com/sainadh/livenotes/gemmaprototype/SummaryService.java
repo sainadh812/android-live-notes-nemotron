@@ -175,7 +175,7 @@ public final class SummaryService extends Service {
 
     private void saveReport(Map<String, Object> report) {
         try { LocalFiles.write(reportFile(this), new GsonBuilder().setPrettyPrinting().create().toJson(report)); }
-        catch (IOException error) { update(status + " Test report could not be saved."); }
+        catch (Exception error) { update(status + " Test report could not be saved."); }
     }
 
     private void update(String message) {

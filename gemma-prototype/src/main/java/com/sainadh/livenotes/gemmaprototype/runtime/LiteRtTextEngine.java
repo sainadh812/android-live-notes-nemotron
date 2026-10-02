@@ -58,10 +58,11 @@ public final class LiteRtTextEngine implements TextEngine, AutoCloseable {
             inputTokens = benchmark == null ? -1 : benchmark.getLastPrefillTokenCount();
             generatedTokens = benchmark == null ? -1 : benchmark.getLastDecodeTokenCount();
             totalCachedTokens = cachedTokens;
-            prefillTokensPerSecond = benchmark == null ? -1 : benchmark.getLastPrefillTokensPerSecond();
-            decodeTokensPerSecond = benchmark == null ? -1 : benchmark.getLastDecodeTokensPerSecond();
-            firstTokenSeconds = benchmark == null ? -1 : benchmark.getTimeToFirstTokenInSecond();
+            prefillTokensPerSecond = benchmark == null ? -1 : finiteMetric(benchmark.getLastPrefillTokensPerSecond());
+            decodeTokensPerSecond = benchmark == null ? -1 : finiteMetric(benchmark.getLastDecodeTokensPerSecond());
+            firstTokenSeconds = benchmark == null ? -1 : finiteMetric(benchmark.getTimeToFirstTokenInSecond());
         }
+        private static double finiteMetric(double value) { return Double.isFinite(value) ? value : -1; }
     }
 
     private final Engine engine;
