@@ -159,7 +159,7 @@ public final class ModelStore {
         long needed = Math.max(0, additionalBytes) + ModelSpec.DISK_RESERVE_BYTES;
         if (available < needed) {
             throw new IOException(String.format(Locale.US,
-                    "Free at least %.1f GB before continuing (includes 1 GiB for runtime caches).",
+                    "Free at least %.1f GB before continuing (includes 3 GiB for runtime caches).",
                     needed / 1_000_000_000.0));
         }
     }

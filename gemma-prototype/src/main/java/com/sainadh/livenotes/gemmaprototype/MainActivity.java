@@ -70,7 +70,7 @@ public final class MainActivity extends Activity {
         text(content, "Long meeting summaries", 27, Color.rgb(19, 40, 34));
         text(content, "A separate test app. Your Live Meeting Notes recordings stay in their existing app.", 15, Color.DKGRAY);
         modelStatus = text(content, "Gemma 4 E4B · 3.66 GB download", 18, Color.BLACK);
-        text(content, "Download once over Wi-Fi. Summaries run on this device; transcripts are never uploaded. Keep at least 5 GB free.", 14, Color.DKGRAY);
+        text(content, "Download once over Wi-Fi. Summaries run on this device; transcripts are never uploaded. Keep at least 8 GB free.", 14, Color.DKGRAY);
         button(content, "Download / resume model", () -> new AlertDialog.Builder(this)
             .setTitle("Download Gemma 4 E4B")
             .setMessage("Download 3.66 GB from the pinned LiteRT model repository. The model uses Google's Gemma terms. No account or API key is needed.")
@@ -105,7 +105,7 @@ public final class MainActivity extends Activity {
         content.addView(reasoning); idleControls.add(reasoning);
         cpu = new CheckBox(this); cpu.setText("Use CPU (default is GPU)");
         content.addView(cpu); idleControls.add(cpu);
-        text(content, "GPU initialization can fall back to CPU. The test report records the actual backend. Reasoning gets a bounded budget; it may not improve accuracy.", 13, Color.DKGRAY);
+        text(content, "GPU initialization can fall back to CPU. CPU uses smaller sections to reduce memory. The report records the actual backend. Reasoning gets a bounded budget; it may not improve accuracy.", 13, Color.DKGRAY);
         button(content, "Summarize / resume", this::summarize);
         stop = new Button(this); stop.setText("Stop and save progress");
         stop.setOnClickListener(v -> startService(new Intent(this, SummaryService.class).setAction(SummaryService.CANCEL)));

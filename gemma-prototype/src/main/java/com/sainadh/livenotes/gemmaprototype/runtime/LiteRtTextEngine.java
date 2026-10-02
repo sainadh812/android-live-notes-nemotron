@@ -107,17 +107,21 @@ public final class LiteRtTextEngine implements TextEngine, AutoCloseable {
         ExperimentalFlags.INSTANCE.setEnableSpeculativeDecoding(false);
         long started = System.nanoTime();
         String actualBackend = requested.name();
+        // CPU uses smaller sections plus the persistent packed-weight cache. A larger uncached
+        // Linux CPU experiment was killed before a response; phone GPU measurements remain separate.
+        int effectiveContext = requested == BackendPreference.CPU ? Math.min(contextTokens, 4096) : contextTokens;
         Engine engine;
         try {
             notify(status, "Loading Gemma on " + actualBackend + "…");
-            engine = initialize(model, cacheDirectory, requested, contextTokens);
+            engine = initialize(model, cacheDirectory, requested, effectiveContext);
         } catch (RuntimeException failure) {
             cancel.throwIfCancelled();
             if (requested != BackendPreference.GPU || !allowCpuFallback) throw failure;
             notify(status, "GPU initialization failed; trying the CPU. This may be slower.");
             actualBackend = "CPU (GPU initialization fallback)";
             try {
-                engine = initialize(model, cacheDirectory, BackendPreference.CPU, contextTokens);
+                effectiveContext = Math.min(contextTokens, 4096);
+                engine = initialize(model, cacheDirectory, BackendPreference.CPU, effectiveContext);
             } catch (RuntimeException cpuFailure) {
                 cpuFailure.addSuppressed(failure);
                 throw cpuFailure;
@@ -130,7 +134,7 @@ public final class LiteRtTextEngine implements TextEngine, AutoCloseable {
             throw cancelled;
         }
         notify(status, "Gemma ready on " + actualBackend + ". Transcript stays on this phone.");
-        return new LiteRtTextEngine(engine, actualBackend, contextTokens,
+        return new LiteRtTextEngine(engine, actualBackend, effectiveContext,
                 TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - started));
     }
 

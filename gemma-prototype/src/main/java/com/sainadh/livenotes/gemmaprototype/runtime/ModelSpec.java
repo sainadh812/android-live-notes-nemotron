@@ -18,5 +18,5 @@ public final class ModelSpec {
     public static final int DEFAULT_CONTEXT_TOKENS = 8192;
     public static final int THINKING_TOKEN_BUDGET = 256;
     /** Room for runtime caches; native RAM requirements are separate from this disk reserve. */
-    public static final long DISK_RESERVE_BYTES = 1024L * 1024 * 1024;
+    public static final long DISK_RESERVE_BYTES = 3L * 1024 * 1024 * 1024;
 }

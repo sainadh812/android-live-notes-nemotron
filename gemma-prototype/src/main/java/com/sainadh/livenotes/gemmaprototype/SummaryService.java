@@ -115,8 +115,8 @@ public final class SummaryService extends Service {
                     SummaryPipeline.Options options = new SummaryPipeline.Options();
                     options.modelFingerprint = ModelSpec.SHA256;
                     options.runtimeIdentity = ModelSpec.RUNTIME_VERSION + ":" + engine.getBackendName();
-                    options.contextWindowTokens = 8192;
-                    options.maxOutputTokens = 2048;
+                    options.contextWindowTokens = engine.getContextTokens();
+                    options.maxOutputTokens = engine.getContextTokens() <= 4096 ? 1024 : 2048;
                     options.thinking = thinking;
                     report.put("options", options);
                     report.put("speculativeDecoding", false);
