@@ -13,6 +13,7 @@ import java.nio.file.Files;
 import java.util.*;
 import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicLong;
 
 /** Owns native work independently of Activity rotation. Checkpoints survive process death. */
 public final class SummaryService extends Service {
@@ -67,6 +68,15 @@ public final class SummaryService extends Service {
             report.put("androidApi", Build.VERSION.SDK_INT);
             report.put("startedAt", new Date().toString());
             report.put("cloudInference", false);
+            ActivityManager.MemoryInfo memory = new ActivityManager.MemoryInfo();
+            getSystemService(ActivityManager.class).getMemoryInfo(memory);
+            report.put("deviceTotalRamBytes", memory.totalMem);
+            report.put("deviceAvailableRamBytesBefore", memory.availMem);
+            report.put("javaHeapLimitBytes", Runtime.getRuntime().maxMemory());
+            if (Build.VERSION.SDK_INT >= 29) report.put("thermalStatusBefore", getSystemService(PowerManager.class).getCurrentThermalStatus());
+            AtomicLong peakPssKiB = new AtomicLong(Debug.getPss());
+            ScheduledExecutorService memorySampler = Executors.newSingleThreadScheduledExecutor();
+            memorySampler.scheduleAtFixedRate(() -> peakPssKiB.accumulateAndGet(Debug.getPss(), Math::max), 2, 2, TimeUnit.SECONDS);
             try {
                 ModelStore store = new ModelStore(this);
                 ModelStore.Progress progress = (phase, done, total) -> update(phase + " · " +
@@ -127,6 +137,10 @@ public final class SummaryService extends Service {
                     try { active.close(); } catch (Exception ignored) { }
                     engine = null;
                 }
+                memorySampler.shutdownNow();
+                report.put("peakSampledProcessPssKiB", peakPssKiB.get());
+                report.put("memorySampleIntervalSeconds", 2);
+                if (Build.VERSION.SDK_INT >= 29) report.put("thermalStatusAfter", getSystemService(PowerManager.class).getCurrentThermalStatus());
                 report.put("totalElapsedMillis", SystemClock.elapsedRealtime() - started);
                 if (RUN.equals(action)) {
                     try { LocalFiles.write(reportFile(this), new GsonBuilder().setPrettyPrinting()

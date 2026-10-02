@@ -19,7 +19,7 @@ The model download needs internet. Summarization does not use any server or API 
 - Later corrections, unresolved decisions and explicit action owners rather than inferred assignments.
 - Per-stage checkpoints keyed to input, model, prompts, runtime/backend and budgets; cancellation and rerunning after process death.
 - Optional **final-stage** reasoning capped at 256 tokens inside a total 2,048-token output budget. Extraction and merging do not use reasoning.
-- Actual backend, initialization/generation timings and available native token/throughput metrics in exported reports.
+- Actual backend, initialization/generation timings, available native token/throughput metrics, sampled peak process PSS and Android thermal status in exported reports.
 
 The 8,192-token context is intentionally bounded. The Android API does not expose standalone tokenization, so preflight uses a conservative UTF-8 byte bound plus template/output reserves. Reported native token counts are separate. Context length and model download size do not determine peak RAM. Real S25 Ultra memory, speed, heat and quality still require running the APK on that phone.
 
